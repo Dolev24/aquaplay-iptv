@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, user-scalable=no">
+<title>AquaPlay IPTV</title>
+<link rel="stylesheet" href="css/style.css">
+<!-- Tizen Samsung Product API (AVPlay). 404s harmlessly in a desktop browser. -->
+<script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+</head>
+<body>
+
+<div id="stage">
+
+  <!-- Video sits underneath the UI. AVPlay renders to a hardware plane on Tizen;
+       in a browser this holds a <video> element. -->
+  <div id="video-layer"></div>
+
+  <!-- ---------------- SETUP / ADD PLAYLIST ---------------- -->
+  <section id="view-setup" class="view">
+    <div class="setup-wrap">
+      <div class="brand"><span class="brand-mark"></span>AquaPlay</div>
+      <h1 id="setup-title">Add your playlist</h1>
+      <p class="setup-sub">Enter the details your IPTV provider gave you.</p>
+
+      <div class="tabs" id="setup-tabs">
+        <div class="tab focusable" data-tab="xtream">Xtream Codes</div>
+        <div class="tab focusable" data-tab="m3u">M3U URL</div>
+      </div>
+
+      <form id="setup-form" onsubmit="return false;">
+        <div class="fields" id="fields-xtream">
+          <label class="field">
+            <span>Playlist name</span>
+            <input class="focusable" type="text" id="x-name" placeholder="My provider" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Server URL</span>
+            <input class="focusable" type="url" id="x-host" placeholder="http://example.com:8080" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Username</span>
+            <input class="focusable" type="text" id="x-user" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input class="focusable" type="password" id="x-pass" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="fields hidden" id="fields-m3u">
+          <label class="field">
+            <span>Playlist name</span>
+            <input class="focusable" type="text" id="m-name" placeholder="My playlist" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>M3U / M3U8 URL</span>
+            <input class="focusable" type="url" id="m-url" placeholder="http://example.com/get.php?..." autocomplete="off">
+          </label>
+          <label class="field">
+            <span>EPG (XMLTV) URL <em>optional</em></span>
+            <input class="focusable" type="url" id="m-epg" placeholder="http://example.com/xmltv.php?..." autocomplete="off">
+          </label>
+        </div>
+
+        <div class="setup-actions">
+          <button type="button" class="btn primary focusable" id="setup-connect">Connect</button>
+          <button type="button" class="btn focusable hidden" id="setup-cancel">Cancel</button>
+        </div>
+        <div class="setup-msg" id="setup-msg"></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ---------------- MAIN BROWSE ---------------- -->
+  <section id="view-main" class="view hidden">
+    <aside id="groups">
+      <div class="pane-head">
+        <span class="pane-title" id="playlist-name">Playlist</span>
+      </div>
+      <div class="sections hidden" id="sections">
+        <div class="sec" data-sec="live">Live</div>
+        <div class="sec" data-sec="vod">Movies</div>
+        <div class="sec" data-sec="series">Series</div>
+      </div>
+      <div class="scroller" id="group-scroller"><div id="group-list"></div></div>
+      <!-- The last stop down the rail, and what left opens from anywhere in
+           it. The arrow and the dots are drawn, not typed: a glyph is at the
+           mercy of whatever font the TV falls back to. -->
+      <div class="rail-hint" id="rail-search"><span class="mag rail-mag"></span>Search</div>
+      <div class="rail-hint" id="rail-settings"><i class="hint-arrow"></i><span class="dots"></span>Settings</div>
+    </aside>
+
+    <main id="channels">
+      <!-- Searching is started from the rail; this is only where the typing
+           lands, so it stays out of the way until there is something in it. -->
+      <div class="pane-head">
+        <div class="search-box hidden" id="search-box">
+          <span class="mag"></span>
+          <input class="focusable" id="search-input" type="text" placeholder="Search channels" autocomplete="off">
+        </div>
+        <span class="pane-title" id="list-title">All channels</span>
+        <span class="count" id="channel-count"></span>
+      </div>
+      <div class="scroller" id="channel-scroller">
+        <div id="channel-spacer"><div id="channel-list"></div></div>
+      </div>
+      <div class="empty hidden" id="channel-empty">No channels here</div>
+      <!-- A legend for the remote, and nothing else: the PC keys that stand in
+           for these while testing are listed by H instead of crowding the bar. -->
+      <div class="action-bar">
+        <span class="act" data-act="play"><i class="k k-ok">OK</i>Play</span>
+        <span class="act" data-act="full"><i class="k k-play"></i>Full screen</span>
+        <span class="act" data-act="fav"><i class="k k-red"></i>Favourite</span>
+        <span class="act" data-act="search"><i class="k k-green"></i>Search</span>
+        <span class="act" data-act="settings"><i class="k k-yellow"></i>Settings</span>
+      </div>
+    </main>
+
+    <aside id="preview">
+      <!-- Full-bleed so the video has no opaque ancestor above it: on Tizen
+           this region is a transparent hole through which AVPlay's hardware
+           plane shows, in a browser the <video> is layered on top of it. -->
+      <div class="preview-frame" id="preview-frame">
+        <div class="preview-placeholder" id="preview-placeholder">
+          <span class="spinner hidden" id="preview-spinner"></span>
+          <span id="preview-hint">Press OK to play</span>
+        </div>
+      </div>
+
+      <div class="preview-body">
+        <div class="preview-meta" id="preview-meta">
+          <div class="pm-name" id="pm-name"></div>
+          <!-- The float has to precede the text it wraps around. -->
+          <div class="pm-now"><span class="pm-left" id="pm-left"></span><span
+               class="pm-now-text" id="pm-now"></span></div>
+          <div class="pm-bar"><i id="pm-bar-fill"></i><b id="pm-knob"></b></div>
+        </div>
+
+        <div class="epg-panel" id="epg-panel">
+          <div class="epg-head">
+            <span class="epg-label">Guide</span>
+            <span class="epg-day" id="epg-day"></span>
+          </div>
+          <div class="epg-scroller" id="epg-scroller"><div id="epg-list"></div><i class="epg-track"><b id="epg-thumb"></b></i></div>
+          <div class="epg-empty hidden" id="epg-empty">No guide for this channel</div>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- Left-arrow drawer: the app-level things that are not per-channel. -->
+  <!-- Right on a channel: what you can do with that channel, in a panel down
+       the right-hand edge. -->
+  <div id="ctxmenu" class="hidden">
+    <div class="cm-panel" id="cm-panel">
+      <div class="cm-head"><div class="cm-title" id="cm-title"></div>
+        <div class="cm-sub" id="cm-sub"></div></div>
+      <div id="cm-list"></div>
+    </div>
+  </div>
+
+  <div id="sidemenu" class="hidden">
+    <div class="sm-panel">
+      <div class="sm-brand"><span class="brand-mark"></span>AquaPlay</div>
+      <div id="sm-list"></div>
+      <div class="sm-foot" id="sm-foot"></div>
+    </div>
+  </div>
+
+  <!-- ---------------- CHANNEL NUMBERS ---------------- -->
+  <section id="view-numbers" class="view hidden">
+    <div class="nm-head">
+      <div class="nm-title">Channel numbers</div>
+      <div class="nm-sub">OK to set a number, <b class="k k-red"></b> to put it back</div>
+      <div class="nm-count" id="nm-count"></div>
+    </div>
+    <div class="nm-scroller" id="nm-scroller"><div id="nm-list"></div></div>
+  </section>
+
+  <!-- ---------------- CATCH-UP BROWSER ---------------- -->
+  <section id="view-replay" class="view hidden">
+    <aside class="rp-left">
+      <div class="pane-head">
+        <span class="pane-title" id="rp-channel">Channel</span>
+      </div>
+      <div class="rp-days-box"><div id="rp-days"></div></div>
+      <div class="rail-hint"><b>&#9664;</b> Back</div>
+    </aside>
+    <main class="rp-right">
+      <div class="pane-head">
+        <span class="rp-title" id="rp-day-title"></span>
+        <span class="count" id="rp-count"></span>
+      </div>
+      <div class="rp-scroller" id="rp-scroller"><div id="rp-list"></div></div>
+      <div class="rp-empty hidden" id="rp-empty">Nothing recorded for this day</div>
+    </main>
+  </section>
+
+  <!-- ---------------- SERIES DETAIL ---------------- -->
+  <section id="view-series" class="view hidden">
+    <aside class="sr-left">
+      <div class="sr-poster" id="sr-poster"></div>
+      <div class="rail-hint"><b>&#9664;</b> Back</div>
+    </aside>
+    <main class="sr-right">
+      <div class="sr-head">
+        <div class="sr-title" id="sr-title"></div>
+        <div class="sr-meta" id="sr-meta"></div>
+        <div class="sr-plot" id="sr-plot"></div>
+      </div>
+      <div class="sr-seasons" id="sr-seasons"></div>
+      <div class="sr-ep-scroller" id="sr-ep-scroller"><div id="sr-episodes"></div></div>
+      <div class="sr-empty hidden" id="sr-empty">No episodes</div>
+    </main>
+  </section>
+
+  <!-- Names the channel playing in the preview. Must sit outside .view: in a
+       browser #video-layer is painted above the whole view stack. -->
+  <div class="preview-badge hidden" id="preview-badge">
+    <i class="live-dot"></i><span id="preview-badge-name"></span>
+  </div>
+
+  <!-- Non-blocking health warning: shown over the video, never over the
+       picture's centre, and it never pauses or restarts anything. -->
+  <div id="stall-warn" class="hidden">
+    <i class="stall-dot"></i><span id="stall-text"></span><b id="stall-hint">OK for live</b>
+  </div>
+
+  <!-- The broadcast time being watched, kept on screen while wound back even
+       after the info bar times out. Outside .view, above #video-layer. -->
+  <div id="ts-clock" class="hidden">
+    <span class="ts-day" id="ts-day"></span>
+    <span class="ts-time" id="ts-time"></span>
+  </div>
+
+  <!-- ---------------- FULLSCREEN OSD ---------------- -->
+  <div id="osd" class="hidden">
+    <!-- Timeshift scrubber. Only shown while winding back and forth. -->
+    <div class="osd-seek hidden" id="osd-seek">
+      <div class="seek-head">
+        <span class="seek-target" id="seek-target"></span>
+        <span class="seek-delta" id="seek-delta"></span>
+        <span class="seek-day" id="seek-day"></span>
+      </div>
+      <div class="seek-line"><i id="seek-fill"></i><b id="seek-knob"></b></div>
+      <div class="seek-scale"><span id="seek-lo"></span><span>Live</span></div>
+    </div>
+    <div class="osd-row">
+      <div class="osd-logo" id="osd-logo"></div>
+      <div class="osd-text">
+        <div class="osd-num" id="osd-num"></div>
+        <div class="osd-name" id="osd-name"></div>
+        <div class="osd-now" id="osd-now"><span class="osd-left" id="osd-left"></span></div>
+        <div class="osd-bar"><i id="osd-bar-fill"></i></div>
+        <div class="osd-desc" id="osd-desc"></div>
+        <div class="osd-next" id="osd-next"></div>
+      </div>
+      <div class="osd-clock" id="osd-clock"></div>
+    </div>
+  </div>
+
+  <div id="zap" class="hidden"></div>
+
+  <!-- ---------------- SETTINGS ---------------- -->
+  <section id="view-settings" class="view hidden">
+    <div class="settings-wrap">
+      <h1>Settings</h1>
+      <div id="settings-list"></div>
+    </div>
+  </section>
+
+  <!-- ---------------- OVERLAYS ---------------- -->
+  <div id="loader" class="hidden">
+    <div class="loader-box">
+      <span class="spinner"></span>
+      <div id="loader-text">Loading</div>
+      <div class="progress hidden" id="loader-progress"><i id="loader-progress-fill"></i></div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+  <!-- Keyboard reference. Desktop-only: on a TV the remote has these buttons. -->
+  <div id="keyhelp" class="hidden">
+    <div class="keyhelp-box">
+      <div class="kh-title">Remote buttons on a keyboard</div>
+      <div class="kh-grid" id="kh-grid"></div>
+      <div class="kh-foot">Press any key to close</div>
+    </div>
+  </div>
+
+  <div id="number" class="hidden">
+    <div class="number-box">
+      <div class="num-title" id="num-title">Channel number</div>
+      <div class="num-value" id="num-value">—</div>
+      <div class="num-sub" id="num-sub"></div>
+      <div class="num-keys">
+        <span><i class="k k-ok">OK</i>Save</span>
+        <span><i class="k k-red"></i>Clear</span>
+        <span><i class="k k-back">BACK</i>Delete</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirm" class="hidden">
+    <div class="confirm-box">
+      <div id="confirm-text"></div>
+      <div class="confirm-actions">
+        <button class="btn focusable" id="confirm-no">No</button>
+        <button class="btn primary focusable" id="confirm-yes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/store.js"></script>
+<script src="js/cache.js"></script>
+<script src="js/inflate.js"></script>
+<script src="js/net.js"></script>
+<script src="js/m3u.js"></script>
+<script src="js/xtream.js"></script>
+<script src="js/epg.js"></script>
+<script src="js/catchup.js"></script>
+<script src="js/player.js"></script>
+<script src="js/keys.js"></script>
+<script src="js/views/setup.js"></script>
+<script src="js/views/channels.js"></script>
+<script src="js/views/replay.js"></script>
+<script src="js/views/series.js"></script>
+<script src="js/views/numbers.js"></script>
+<script src="js/views/settings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+node_modules/
+.dist/
+.test/
+.local/*
+!.local/README.txt
+*.wgt
+shot-*.png

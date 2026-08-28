@@ -1,0 +1,7 @@
+# Build output and working files. app/.gitignore covers the rest of these
+# inside app/; this is for anything that lands at the root.
+*.wgt
+node_modules/
+.dist/
+.test/
+shot-*.png

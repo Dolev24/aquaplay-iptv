@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="http://aquaplay.iptv/aquaplay"
+        version="0.7.21"
+        viewmodes="maximized">
+
+  <!-- The package id is the 10-character prefix: 10 alphanumeric characters
+       is all the format requires, and this one qualifies. If Tizen Studio's
+       profile wizard hands you a different one, use that instead — both the
+       id and the package attribute have to carry the same prefix.
+       What the TV actually refuses is an UNSIGNED package: signing needs a
+       Samsung certificate profile made against this TV's DUID. -->
+  <tizen:application id="AquaPlay01.AquaPlay" package="AquaPlay01" required_version="4.0"/>
+
+  <name>AquaPlay IPTV</name>
+  <description>Lightweight IPTV player</description>
+  <author href="" email="">AquaPlay</author>
+
+  <content src="index.html"/>
+  <icon src="icon.png"/>
+
+  <!-- Network: allow the app to reach any provider host -->
+  <access origin="*" subdomains="true"/>
+  <tizen:allow-navigation>*</tizen:allow-navigation>
+  <tizen:content-security-policy>
+    default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; media-src *; img-src * data:;
+  </tizen:content-security-policy>
+
+  <!-- Privileges -->
+  <tizen:privilege name="http://tizen.org/privilege/internet"/>
+  <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+  <tizen:privilege name="http://tizen.org/privilege/tv.audio"/>
+  <tizen:privilege name="http://tizen.org/privilege/application.launch"/>
+  <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
+
+  <feature name="http://tizen.org/feature/screen.size.all"/>
+
+  <tizen:profile name="tv-samsung"/>
+  <tizen:setting screen-orientation="landscape"
+                 context-menu="disable"
+                 background-support="disable"
+                 encryption="disable"
+                 install-location="auto"
+                 hwkey-event="enable"/>
+</widget>

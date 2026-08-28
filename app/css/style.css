@@ -1,0 +1,1144 @@
+/* AquaPlay IPTV — TV-native dark theme.
+   Targets Chromium 56+ (Tizen 4.0 / 2018 TVs): no CSS grid, no flex gap,
+   no clamp(), no :is(). Custom properties only (Chrome 49+). */
+
+:root{
+  --bg:        #0a0c10;
+  --bg-2:      #101319;
+  --bg-3:      #161a22;
+  --line:      #232833;
+  --text:      #e8ecf3;
+  --text-dim:  #8b93a4;
+  --text-dim2: #5d6474;
+  --text-mid:  #c3cad6;
+  --accent:    #4c8dff;
+  --accent-dim:#1f3a66;
+  --fav:       #ffb44c;
+  --heart:     #ff3b5c;
+  --live:      #ff4d5e;
+  --row-alt:   rgba(255,255,255,.035);
+  --row-h:     76px;
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+html,body{
+  width:100%; height:100%; overflow:hidden; background:#000;
+  font-family:"Samsung One","SamsungOne",-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--text);
+  -webkit-user-select:none; user-select:none;
+  cursor:default;
+}
+
+/* Fixed 1920x1080 stage, scaled by JS. Keeps TV and browser pixel-identical,
+   and matches the coordinate space AVPlay.setDisplayRect expects. */
+#stage{
+  position:absolute; top:0; left:0;
+  width:1920px; height:1080px;
+  transform-origin:0 0;
+  background:var(--bg);
+  overflow:hidden;
+}
+
+/* Light theme: the panes invert, the video overlays stay dark because they
+   sit on top of a picture, not on a background. */
+/* Light, not white. A TV is a lamp: a white panel across 55 inches in a dim
+   room is painful to sit in front of, so nothing in here is white. The palette
+   is a soft grey-blue paper, taken down a second time after the first attempt
+   still read as glare, with the text dark enough that the contrast stays well
+   clear of what the surfaces gave up. */
+html.light{
+  --bg:        #ccd3df;
+  --bg-2:      #d9dfe9;   /* raised: panels and inputs, still the lightest thing */
+  --bg-3:      #bfc8d6;
+  --line:      #a9b4c4;
+  --text:      #10141d;
+  --text-dim:  #454e5d;
+  --text-dim2: #69737f;
+  --text-mid:  #2c3444;
+  --accent:    #2b64cf;
+  --accent-dim:#b6cbee;
+  --fav:       #b06c00;
+  --heart:     #cc1c34;
+  --live:      #bc1c30;
+  --row-alt:   rgba(16,24,40,.05);
+}
+html.light body{ background:#c2cad7; }
+html.light .ch-row:after{ background:rgba(0,0,0,.07); }
+html.light .ch-prog{ background:rgba(0,0,0,.12); }
+html.light .pm-bar{ background:rgba(0,0,0,.12); }
+html.light .epg-bar{ background:rgba(0,0,0,.14); }
+html.light .ch-logo.blank{ background-color:rgba(0,0,0,.06); }
+html.light .seek-line{ background:rgba(255,255,255,.18); }
+
+.hidden{ display:none !important; }
+
+/* The TV has no pointer, but a browser session does — show what is clickable. */
+.tab, .btn, .sec, .group-row, .ch-row, .epg-row,
+.set-row, .sr-season, .sr-ep, #search-input, #video-layer{ cursor:pointer; }
+.field input{ cursor:text; }
+
+/* Video sits ABOVE the panes in a browser (it is a real <video> node) and is
+   moved/resized to whatever region should show it. On Tizen the AVPlay plane
+   is behind the page instead, so there the page must be transparent wherever
+   video should appear — see the .tizen rules below. */
+#video-layer{
+  position:absolute; top:0; left:0; width:1920px; height:1080px;
+  background:#000; z-index:5;
+}
+#video-layer video{ width:100%; height:100%; object-fit:contain; background:#000; }
+#video-layer object{ width:100%; height:100%; }
+#stage:not(.preview-on):not(.playing-full) #video-layer{ display:none; }
+#stage.playing-full .view{ display:none !important; }
+
+.view{ position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:1; }
+
+/* Tizen: nothing opaque may sit over the hardware video plane. Each pane
+   paints its own background instead of one big backdrop. */
+.tizen #stage{ background:transparent; }
+.tizen #video-layer{ background:transparent; z-index:0; }
+.tizen #view-setup, .tizen #view-settings{ background:var(--bg); }
+
+/* ============================ SETUP ============================ */
+.setup-wrap{ position:absolute; left:200px; top:130px; width:820px; }
+.brand{ font-size:26px; letter-spacing:.18em; text-transform:uppercase; color:var(--text-dim); margin-bottom:44px; }
+.brand-mark{
+  display:inline-block; width:14px; height:14px; border-radius:4px;
+  background:var(--accent); margin-right:14px; vertical-align:middle;
+}
+.setup-wrap h1{ font-size:52px; font-weight:600; letter-spacing:-.01em; }
+.setup-sub{ font-size:24px; color:var(--text-dim); margin-top:14px; }
+
+.tabs{ margin:44px 0 12px; font-size:0; }
+.tab{
+  display:inline-block; font-size:24px; padding:16px 34px; margin-right:14px;
+  border-radius:12px; background:var(--bg-3); color:var(--text-dim);
+  border:2px solid transparent;
+}
+.tab.active{ color:var(--text); background:var(--bg-3); border-color:var(--line); }
+.tab.focused{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.fields{ margin-top:30px; }
+.field{ display:block; margin-bottom:22px; }
+.field > span{ display:block; font-size:19px; color:var(--text-dim); margin-bottom:9px; }
+.field > span em{ font-style:normal; color:var(--text-dim2); }
+.field input{
+  display:block; width:100%; height:74px; padding:0 24px;
+  font-size:25px; color:var(--text); background:var(--bg-2);
+  border:2px solid var(--line); border-radius:12px; outline:none;
+  font-family:inherit;
+}
+.field input.focused{ border-color:var(--accent); background:var(--bg-3); }
+
+.setup-actions{ margin-top:38px; font-size:0; }
+.btn{
+  display:inline-block; font-family:inherit; font-size:25px; font-weight:500;
+  padding:20px 52px; margin-right:16px; border-radius:12px; cursor:pointer;
+  background:var(--bg-3); color:var(--text); border:2px solid var(--line); outline:none;
+}
+.btn.primary{ background:var(--bg-3); }
+.btn.focused{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.setup-msg{ margin-top:26px; font-size:22px; min-height:30px; color:var(--live); }
+.setup-msg.ok{ color:#4cd18a; }
+
+/* ============================ MAIN ============================ */
+#view-main{ padding:0; }
+
+.pane-head{
+  height:96px; padding:0 30px; border-bottom:1px solid var(--line);
+  position:relative; white-space:nowrap;
+}
+.pane-title{
+  display:inline-block; line-height:96px; font-size:22px; color:var(--text-dim);
+  text-transform:uppercase; letter-spacing:.14em; overflow:hidden;
+  text-overflow:ellipsis; max-width:320px; vertical-align:top;
+}
+
+/* --- groups rail --- */
+/* The rail folds away when the cursor leaves it, giving the channel list the
+   width, and slides back when the cursor returns. A sliver stays behind: a
+   drawer with no handle is a drawer nobody opens. */
+#groups{ transition:width .18s ease; overflow:hidden; }
+#channels{ transition:left .18s ease; }
+#stage.rail-in #groups{ width:26px; }
+#stage.rail-in #channels{ left:26px; }
+/* Folded, the rail shows nothing but the handle: a sliver of half-clipped
+   group names reads as a rendering fault rather than as a drawer. */
+#stage.rail-in #groups > *{ opacity:0; transition:opacity .12s ease; }
+#stage.rail-in #groups:after{
+  content:""; position:absolute; right:7px; top:50%; margin-top:-10px;
+  width:0; height:0; border-left:10px solid var(--text-dim);
+  border-top:10px solid transparent; border-bottom:10px solid transparent;
+}
+#groups{
+  position:absolute; left:0; top:0; width:280px; height:1080px;
+  background:var(--bg-2); border-right:1px solid var(--line);
+}
+#group-scroller{ position:absolute; top:96px; bottom:128px; left:0; right:0; overflow:hidden; }
+#group-list{ position:absolute; top:0; left:0; right:0; }
+.group-row{
+  position:absolute; left:10px; right:10px;
+  height:64px; line-height:64px; padding:0 18px; font-size:21px; color:var(--text-dim);
+  border-radius:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.group-row .gcount{ float:right; font-size:17px; color:var(--text-dim2); margin-left:10px; }
+.group-row.selected{ color:var(--text); background:var(--bg-3); }
+.group-row.selected:before{
+  content:""; position:absolute; left:0; top:16px; bottom:16px; width:3px;
+  border-radius:2px; background:var(--accent);
+}
+.group-row.focused:before{ display:none; }
+.group-row.focused{ background:var(--accent); color:#fff; }
+.group-row.focused .gcount{ color:rgba(255,255,255,.78); }
+.group-row.pinned{ color:var(--text); }
+
+/* --- content sections (Live / Movies / Series) --- */
+.sections{
+  position:absolute; top:96px; left:0; right:0; height:66px;
+  padding:9px 12px 0; border-bottom:1px solid var(--line);
+  font-size:0; white-space:nowrap;
+}
+.sec{
+  display:inline-block; font-size:18px; line-height:44px; padding:0 15px;
+  margin-right:3px; border-radius:11px; color:var(--text-dim2);
+}
+.sec.active{ color:var(--text); background:var(--bg-3); }
+.sec.focused{ background:var(--accent); color:#fff; }
+#groups.has-sections #group-scroller{ top:162px; }
+
+#rail-search{ bottom:64px; }
+.rail-mag{ margin:0 16px 0 2px; vertical-align:middle; }
+.rail-hint.focused .rail-mag:before{ border-color:#fff; }
+.rail-hint.focused .rail-mag:after{ background:#fff; }
+.rail-hint{
+  position:absolute; bottom:0; left:0; right:0; height:64px; line-height:64px;
+  padding:0 24px; font-size:17px; color:var(--text-dim2);
+  border-top:1px solid var(--line); white-space:nowrap; cursor:pointer;
+}
+.rail-hint.focused{ background:var(--accent); color:#fff; }
+.rail-hint.focused .hint-arrow{ border-right-color:#fff; }
+.rail-hint.focused .dots, .rail-hint.focused .dots:before,
+.rail-hint.focused .dots:after{ background:#fff; }
+.rail-hint b{ color:var(--text-dim); margin-right:8px; }
+.hint-arrow{
+  display:inline-block; vertical-align:middle; margin-right:12px;
+  width:0; height:0; border-right:9px solid var(--text-dim);
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+}
+/* The three dots a menu has everywhere else, drawn rather than typed. */
+.rail-hint .dots{
+  position:relative; display:inline-block; width:4px; height:4px;
+  margin:0 18px 0 4px; vertical-align:middle;
+  background:var(--text-dim); border-radius:50%;
+}
+.rail-hint .dots:before, .rail-hint .dots:after{
+  content:""; position:absolute; left:0; width:4px; height:4px;
+  background:var(--text-dim); border-radius:50%;
+}
+.rail-hint .dots:before{ left:-7px; }
+.rail-hint .dots:after{ left:7px; }
+
+/* --- channel list --- */
+#list-title{ font-size:26px; color:var(--text); line-height:64px; }
+#channels{
+  position:absolute; left:280px; top:0; right:1040px; height:1080px;
+  background:var(--bg);
+}
+.search-box{ position:relative; display:inline-block; width:100%; padding-top:16px; }
+.search-box .mag{
+  position:absolute; left:4px; top:38px; width:17px; height:17px;
+  border:2px solid var(--text-dim2); border-radius:50%;
+}
+.search-box .mag:after{
+  content:""; position:absolute; right:-8px; bottom:-6px; width:9px; height:2px;
+  background:var(--text-dim2); transform:rotate(45deg);
+}
+#search-input{
+  width:100%; height:64px; padding:0 90px 0 36px; font-size:21px; font-family:inherit;
+  background:transparent; border:none; border-bottom:2px solid transparent;
+  color:var(--text); outline:none;
+}
+#search-input::-webkit-input-placeholder{ color:var(--text-dim2); }
+#search-input.focused{ border-bottom-color:var(--accent); }
+.count{
+  position:absolute; right:24px; top:0; line-height:96px; font-size:17px; color:var(--text-dim2);
+}
+
+#channel-scroller{ position:absolute; top:96px; bottom:64px; left:0; right:0; overflow:hidden; }
+#channel-spacer{ position:relative; width:100%; }
+#channel-list{ position:absolute; top:0; left:0; right:0; }
+
+.ch-row{
+  position:absolute; left:12px; right:12px; height:var(--row-h);
+  display:flex; align-items:center; padding:0 16px;
+  border-radius:14px; white-space:nowrap;
+}
+.ch-row:after{
+  content:""; position:absolute; left:16px; right:16px; bottom:0; height:1px;
+  background:rgba(255,255,255,.05);
+}
+.ch-row.alt{ background:var(--row-alt); }
+.ch-row.focused{
+  background:var(--accent);
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
+}
+.ch-row.focused:after{ display:none; }
+
+/* The channel that is actually playing keeps a marker while you browse away. */
+.ch-row.playing:before{
+  content:""; position:absolute; left:0; top:20px; bottom:20px; width:3px;
+  border-radius:2px; background:var(--live);
+}
+.ch-row.playing .ch-name{ color:var(--accent); font-weight:600; }
+.ch-row.focused.playing .ch-name{ color:#fff; }
+.ch-row.focused.playing:before{ background:#fff; }
+
+/* Sized and coloured to be read, not glanced at. The number was 19px in
+   --text-dim2, which is the dimmest text token the app has, and the programme
+   line was 17px in --text-dim: both are legible to someone with good sight at
+   two metres and to nobody else. There is room in a 76px row for all three
+   lines to grow. */
+.ch-num{
+  flex:0 0 56px; font-size:24px; color:var(--text-dim);
+  text-align:right; margin-right:14px;
+}
+.ch-row.focused .ch-num{ color:rgba(255,255,255,.86); }
+.ch-num.custom{ color:var(--fav); }
+.ch-row.focused .ch-num.custom{ color:#fff; }
+
+.ch-logo{
+  flex:0 0 52px; height:38px; margin-right:14px; border-radius:6px;
+  background-position:center; background-repeat:no-repeat; background-size:contain;
+}
+.ch-logo.blank{ background-color:rgba(255,255,255,.05); }
+.ch-row.focused .ch-logo.blank{ background-color:rgba(255,255,255,.18); }
+
+.ch-text{ flex:1 1 auto; min-width:0; }
+.ch-name{
+  display:block; font-size:25px; line-height:30px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ch-row.focused .ch-name{ color:#fff; }
+.ch-now{
+  display:block; font-size:21px; line-height:26px; color:var(--text-mid); margin-top:1px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ch-row.focused .ch-now{ color:rgba(255,255,255,.9); }
+
+.ch-right{ flex:0 0 auto; margin-left:14px; width:62px; text-align:center; }
+/* Drawn with two rounded boxes, so no font has to own a heart glyph. */
+.ch-fav{ position:relative; display:block; width:22px; height:20px; margin:0 auto 5px; }
+.ch-fav.on:before, .ch-fav.on:after{
+  content:""; position:absolute; top:0; width:11px; height:17px;
+  background:var(--heart); border-radius:11px 11px 0 0;
+}
+.ch-fav.on:before{ left:11px; transform:rotate(-45deg); transform-origin:0 100%; }
+.ch-fav.on:after{ left:0; transform:rotate(45deg); transform-origin:100% 100%; }
+.ch-row.focused .ch-fav.on:before, .ch-row.focused .ch-fav.on:after{ background:#fff; }
+/* A padlock out of a box and half a ring, for the same reason as the heart:
+   no font on the TV is guaranteed to own the glyph. Only ever drawn while the
+   session is unlocked — otherwise the channel is not in the list at all. */
+.ch-lock{ position:relative; display:block; width:22px; height:20px; margin:0 auto 5px; }
+.ch-lock.on:before{
+  content:""; position:absolute; left:4px; top:8px; width:14px; height:11px;
+  border-radius:3px; background:var(--text-dim);
+}
+.ch-lock.on:after{
+  content:""; position:absolute; left:7px; top:2px; width:8px; height:8px;
+  border:2px solid var(--text-dim); border-bottom:0;
+  border-radius:5px 5px 0 0;
+}
+.ch-row.focused .ch-lock.on:before{ background:#fff; }
+.ch-row.focused .ch-lock.on:after{ border-color:#fff; }
+.ch-prog{
+  display:block; width:62px; height:3px; margin:0 auto;
+  background:rgba(255,255,255,.14); border-radius:2px; overflow:hidden;
+}
+.ch-prog i{ display:block; height:100%; background:var(--text-dim); }
+.ch-row.focused .ch-prog i{ background:#fff; }
+
+.empty{
+  position:absolute; top:46%; left:0; right:0; text-align:center;
+  font-size:23px; color:var(--text-dim2);
+}
+
+.action-bar{
+  position:absolute; left:0; right:0; bottom:0; height:64px; line-height:64px;
+  padding:0 14px; border-top:1px solid var(--line); white-space:nowrap; font-size:0;
+  overflow:hidden;   /* clip rather than push the layout if a font runs wide */
+}
+.act{ display:inline-block; font-size:15px; color:var(--text-dim); margin-right:10px; }
+.act .k{ margin-right:7px; }
+
+#keyhelp{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:11;
+  background:rgba(6,8,12,.88);
+}
+.keyhelp-box{
+  position:absolute; top:50%; left:50%; width:820px; margin:-330px 0 0 -410px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:20px; padding:44px 50px;
+}
+.kh-title{ font-size:30px; font-weight:600; margin-bottom:28px; }
+.kh-row{ height:44px; line-height:44px; border-bottom:1px solid rgba(35,40,51,.6); }
+.kh-row:last-child{ border-bottom:none; }
+.kh-what{ font-size:20px; color:var(--text); }
+.kh-what .k{ margin-right:12px; }
+.kh-key{ float:right; font-size:18px; color:var(--text-dim); }
+.kh-foot{ margin-top:26px; font-size:17px; color:var(--text-dim2); }
+
+/* --- typing a number ---
+   A popout in the middle of the screen, above everything including the help
+   overlay: while it is open it has every key, so it had better be the thing
+   the viewer is looking at. */
+#number{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:12;
+  background:rgba(6,8,12,.72);
+}
+html.light #number{ background:rgba(20,24,33,.5); }
+.number-box{
+  /* Centred by transform rather than by a margin guessed from its height: the
+     box grows with its title and subtitle, and a wrong guess puts it high. */
+  position:absolute; top:50%; left:50%; width:620px;
+  transform:translate(-50%, -50%);
+  background:var(--bg-2); border:1px solid var(--line); border-radius:22px;
+  padding:40px 44px 34px; text-align:center;
+  box-shadow:0 30px 80px rgba(0,0,0,.55);
+}
+.num-title{
+  font-size:28px; font-weight:600; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.num-value{
+  margin:26px 0 6px; min-height:101px; font-size:96px; line-height:1.05;
+  font-weight:600; letter-spacing:.06em; color:var(--accent);
+}
+/* Nothing typed yet: something to type on, rather than a dash the size of a
+   sausage at this font size. */
+.num-value.num-empty:after{
+  content:""; display:inline-block; width:150px; height:7px; border-radius:4px;
+  background:var(--accent-dim); vertical-align:middle;
+}
+.num-sub{ font-size:19px; color:var(--text-dim); min-height:24px; }
+.num-keys{
+  margin-top:30px; padding-top:22px; border-top:1px solid var(--line);
+  font-size:0;
+}
+.num-keys span{
+  display:inline-block; font-size:17px; color:var(--text-dim); margin:0 16px;
+}
+.num-keys .k{ margin-right:8px; }
+
+/* --- preview pane --- */
+#preview{
+  position:absolute; right:0; top:0; width:1040px; height:1080px;
+  background:transparent;
+}
+.preview-frame{
+  position:absolute; top:0; left:0; width:1040px; height:585px;
+  background:#000; overflow:hidden;
+}
+.tizen .preview-frame{ background:transparent; }
+.preview-placeholder{
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  text-align:center; line-height:585px; font-size:21px; color:var(--text-dim2);
+}
+#stage.preview-on .preview-placeholder #preview-hint{ display:none; }
+
+/* Names the channel that is playing, which is not always the focused one.
+   Anchored to the stage, not the pane: it has to sit above #video-layer, and
+   in a browser that layer is painted above every .view. Coordinates match
+   .preview-frame (880,0 1040x585). */
+.preview-badge{
+  position:absolute; left:906px; bottom:517px; max-width:660px; z-index:6;
+  padding:9px 20px 9px 15px; border-radius:100px;
+  background:rgba(6,8,12,.74); font-size:17px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#stage.playing-full .preview-badge{ display:none; }
+.live-dot{
+  display:inline-block; width:9px; height:9px; border-radius:50%;
+  background:var(--live); margin-right:10px; vertical-align:middle;
+}
+/* Replay is not live, so the dot must not claim it is. */
+.preview-badge.replay .live-dot{ background:var(--accent); }
+
+.preview-body{
+  position:absolute; top:585px; left:0; right:0; bottom:0;
+  background:var(--bg-2); border-left:1px solid var(--line); border-top:1px solid var(--line);
+}
+.preview-meta{ position:absolute; top:0; left:0; right:0; height:122px; padding:22px 32px 0; }
+.pm-name{
+  font-size:30px; font-weight:600; line-height:36px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.pm-now{ font-size:19px; margin-top:7px; min-height:24px; overflow:hidden; white-space:nowrap; }
+.pm-now-text{
+  display:block; color:var(--text-dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+/* How long is left, which is the thing you actually want to know. Floated so
+   the title ellipsises against it instead of pushing it off. */
+.pm-left{ float:right; margin-left:18px; color:var(--text); font-weight:600; }
+
+.pm-bar{
+  position:relative; height:6px; margin-top:14px; border-radius:3px;
+  background:rgba(255,255,255,.13);
+}
+.pm-bar i{ display:block; height:100%; width:0; border-radius:3px; background:var(--accent); }
+/* A knob turns a fill into a position: you can see where you are, not just
+   how much is coloured in. */
+.pm-bar b{
+  position:absolute; top:-3px; width:12px; height:12px; margin-left:-6px;
+  border-radius:50%; background:#fff; box-shadow:0 1px 5px rgba(0,0,0,.55);
+}
+/* Nothing to show a position for without a guide entry. */
+.preview-meta.no-prog .pm-bar{ display:none; }
+
+/* --- guide viewer under the player --- */
+.epg-panel{ position:absolute; top:122px; left:0; right:0; bottom:0; border-top:1px solid var(--line); }
+.epg-head{ height:48px; line-height:48px; padding:0 32px; }
+.epg-label{ font-size:15px; letter-spacing:.16em; text-transform:uppercase; color:var(--text-dim2); }
+.epg-day{ float:right; font-size:15px; color:var(--text-dim2); }
+/* Five rows exactly (5 x 60px), out of the nine the panel holds. It has to be
+   a whole number of rows: the one on air is the fifth of nine and is centred
+   by arithmetic, and a box of 323px would leave it 11px off. */
+.epg-scroller{
+  position:absolute; top:48px; left:0; right:0; height:300px;
+  overflow:hidden; padding:0 20px;
+}
+/* Five whole rows fill the box exactly, so nothing peeks over the edge to say
+   there is more. This says it instead — and says where in the nine you are,
+   which a fade could not. It lives in the scroller's right-hand padding, clear
+   of the longest programme name. */
+.epg-track{
+  position:absolute; right:7px; top:6px; bottom:6px; width:3px;
+  border-radius:2px; background:rgba(255,255,255,.10);
+  opacity:0; transition:opacity .12s linear;
+}
+html.light .epg-track{ background:rgba(0,0,0,.13); }
+.epg-scroller.scrolls .epg-track{ opacity:1; }
+.epg-track b{
+  position:absolute; left:0; width:3px; border-radius:2px;
+  background:var(--text-dim2); transition:top .12s ease-out;
+}
+.epg-panel.active .epg-track b{ background:var(--accent); }
+#epg-list{ position:relative; transition:transform .12s ease-out; }
+/* Centred in the row, not sitting on top of it. The row is 60px and the text
+   was pinned to the first 24 of them by `flex-start` plus a 9px top padding,
+   which left the name floating above its own line and a gap underneath.
+
+   The height must stay 60px whatever the type does: GUIDE_H, PANEL_VIEW and
+   the scroller's own height are all counted in rows, and the programme on air
+   is centred by that arithmetic. So the sizes below grow into the row, never
+   past it. */
+.epg-row{
+  position:relative; height:60px; padding:0 12px;
+  border-radius:12px; display:flex; align-items:center;
+}
+/* Three sizes, biggest in the middle: what is on air, then the programme
+   either side of it, then the rest. 20px in --text-dim was a size for glancing
+   at, and the row on air was the same size as the row four hours ago.
+   Everything still fits a 60px row — a 27px name is a 34px line, and the only
+   row that also carries a progress bar is the one on air, at 34 + 3 + 8. */
+.epg-time{ flex:0 0 80px; font-size:20px; line-height:26px; color:var(--text-dim); }
+.epg-body{ flex:1 1 auto; min-width:0; }
+.epg-name{
+  display:block; font-size:22px; line-height:28px; color:var(--text-mid);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.epg-row.near .epg-name{ font-size:24px; line-height:30px; color:var(--text); }
+.epg-row.near .epg-time{ font-size:21px; }
+/* display:block, because the markup is a <span>: an inline box ignores a
+   height, so this bar has been 0px tall and invisible since it was written.
+   The channel list's own .ch-prog says display:block for the same reason. */
+.epg-bar{
+  display:block; height:4px; background:rgba(255,255,255,.12);
+  border-radius:2px; margin-top:7px; overflow:hidden;
+}
+.epg-bar i{ display:block; height:100%; width:0; background:var(--accent); }
+/* A line under each programme, so the panel reads as a schedule rather than a
+   paragraph — and a box around whatever is on air, so the eye lands on it
+   without having to read anything. */
+.epg-row:after{
+  content:""; position:absolute; left:12px; right:12px; bottom:0; height:1px;
+  background:rgba(255,255,255,.07);
+}
+.epg-row:last-child:after{ display:none; }
+.epg-row.now{ background:rgba(255,255,255,.055); border-radius:12px; }
+.epg-row.now:after{ display:none; }
+.epg-panel.active .epg-row.focused:after{ display:none; }
+html.light .epg-row:after{ background:rgba(0,0,0,.09); }
+html.light .epg-row.now{ background:rgba(0,0,0,.05); }
+.epg-row.past .epg-time, .epg-row.past .epg-name{ opacity:.42; }
+/* A finished programme the provider still has a recording of. The marker is a
+   clock wound backwards — drawn, never typed: a glyph is at the mercy of
+   whatever font the TV falls back to, which is how a tofu box and the letters
+   "B7" once ended up beside every replayable programme. Three shapes, so it
+   needs an element of its own: the dial, the arrow head in the gap, and the
+   hand. */
+.epg-row.replay .epg-time, .epg-row.replay .epg-name{ opacity:.72; }
+/* A clock wound back, drawn rather than set: a glyph would be a gamble on the
+   TV's fonts. Sized to be read from a sofa — it was 13px and looked like a
+   speck next to the programme name. */
+.epg-replay{
+  position:relative; display:inline-block; width:19px; height:19px;
+  margin-left:12px; vertical-align:-4px;
+  border:2px solid var(--accent); border-radius:50%;
+  border-top-color:transparent;
+}
+.epg-replay:before{
+  content:""; position:absolute; top:-6px; left:-4px;
+  width:0; height:0; border-right:9px solid var(--accent);
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+}
+.epg-replay:after{
+  content:""; position:absolute; left:6px; top:3px;
+  width:3px; height:7px; background:var(--accent); border-radius:2px;
+}
+.epg-panel.active .epg-row.focused .epg-replay{
+  border-color:#fff; border-top-color:transparent;
+}
+.epg-panel.active .epg-row.focused .epg-replay:before{ border-right-color:#fff; }
+.epg-panel.active .epg-row.focused .epg-replay:after{ background:#fff; }
+/* A bell on a programme somebody asked to be told about. Amber, not the
+   accent: it has to be told apart from the replay clock at a glance. */
+.epg-remind{
+  position:relative; display:inline-block; width:15px; height:18px;
+  margin-left:12px; vertical-align:-4px;
+}
+.epg-remind:before{
+  content:""; position:absolute; left:0; top:0; width:15px; height:12px;
+  background:var(--fav); border-radius:8px 8px 2px 2px;
+}
+.epg-remind:after{
+  content:""; position:absolute; left:5px; top:13px; width:5px; height:5px;
+  background:var(--fav); border-radius:50%;
+}
+.epg-panel.active .epg-row.focused .epg-remind:before,
+.epg-panel.active .epg-row.focused .epg-remind:after{ background:#fff; }
+.epg-row.now .epg-name{ font-size:27px; line-height:34px; color:var(--text); font-weight:600; }
+.epg-row.now .epg-time{ font-size:23px; color:var(--accent); font-weight:600; }
+/* Nothing is on air — a gap in the schedule, a guide that ran out, one that
+   does not start until later — so this is the row nearest to now, and where
+   the cursor is resting. Quieter than `.now`, because it is not on now: the
+   same seat, without the bold and without the accent clock. Without it the
+   panel has no marked row at all on those channels, which reads as the app
+   having failed to notice what is playing. */
+.epg-row.here{ background:rgba(255,255,255,.035); border-radius:12px; }
+.epg-row.here:after{ display:none; }
+html.light .epg-row.here{ background:rgba(0,0,0,.035); }
+.epg-row.here .epg-name{ color:var(--text-dim); }
+.epg-row.here .epg-time{ color:var(--text-dim); }
+/* Only tinted while the guide has focus, so it never competes with the list. */
+.epg-panel.active .epg-row.focused{ background:var(--accent); }
+.epg-panel.active .epg-row.focused .epg-time,
+.epg-panel.active .epg-row.focused .epg-name{ color:#fff; opacity:1; }
+.epg-panel.active .epg-row.focused .epg-bar{ background:rgba(255,255,255,.28); }
+.epg-panel.active .epg-row.focused .epg-bar i{ background:#fff; }
+.epg-empty{
+  position:absolute; top:120px; left:0; right:0; text-align:center;
+  font-size:20px; color:var(--text-dim2);
+}
+
+/* --- what you can do with a channel: a panel down the right-hand edge --- */
+#ctxmenu{
+  position:absolute; left:0; top:0; width:1920px; height:1080px; z-index:7;
+  background:rgba(6,8,12,.5);
+}
+html.light #ctxmenu{ background:rgba(20,24,33,.3); }
+.cm-panel{
+  position:absolute; right:0; top:0; width:620px; height:1080px;
+  background:var(--bg-2); border-left:1px solid var(--line); padding-top:44px;
+}
+.cm-head{ padding:0 36px 26px; }
+.cm-title{
+  font-size:36px; font-weight:600; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.cm-sub{ font-size:21px; color:var(--text-dim2); margin-top:10px;
+         overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-row{
+  position:relative; height:88px; line-height:88px; margin:0 14px; padding:0 22px;
+  border-radius:14px; font-size:30px; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer;
+}
+.cm-row:after{
+  content:""; position:absolute; left:24px; right:24px; bottom:0; height:1px;
+  background:rgba(255,255,255,.09);
+}
+html.light .cm-row:after{ background:rgba(0,0,0,.10); }
+.cm-row:last-child:after{ display:none; }
+.cm-row.focused{ background:var(--accent); color:#fff; }
+.cm-row.focused:after{ display:none; }
+
+/* --- shared by both side panels ---
+   One icon column, so the labels line up under each other and the eye can run
+   down the words without the pictures pushing them about. The icon is a glyph
+   and the label is not: they are separate spans, so a set whose font has no
+   emoji loses a picture rather than growing a box in the middle of a word. */
+.mi-ico{
+  display:inline-block; width:54px; font-size:27px; line-height:1;
+  vertical-align:middle; text-align:left;
+}
+.mi-label{ vertical-align:middle; }
+.cm-row .mi-label, .sm-row .mi-label{
+  display:inline-block; max-width:440px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle;
+}
+
+/* --- shared remote-key chips --- */
+.k{
+  display:inline-block; width:16px; height:16px; border-radius:50%;
+  margin-right:12px; vertical-align:middle; font-style:normal;
+}
+.k-red{ background:#e34b5c; } .k-green{ background:#3fb96b; }
+.k-yellow{ background:#e0b73c; } .k-blue{ background:#3f7fd1; }
+.k-ok, .k-back, .k-play{
+  width:auto; border-radius:5px; padding:2px 8px; font-size:13px; line-height:17px;
+  background:var(--bg-3); color:var(--text-dim); border:1px solid var(--line);
+}
+/* The remote's play button, drawn with borders. A glyph would be at the mercy
+   of whatever font the TV falls back to - see the tofu in the guide. */
+.k-play{ padding:2px 9px; }
+.k-play:before{
+  content:""; display:inline-block; vertical-align:middle; margin-top:-2px;
+  width:0; height:0; border-left:9px solid var(--text-dim);
+  border-top:5px solid transparent; border-bottom:5px solid transparent;
+}
+
+/* --- stream health warning --- */
+#stall-warn{
+  position:absolute; z-index:6; padding:9px 20px 9px 15px; border-radius:100px;
+  background:rgba(6,8,12,.86); border:1px solid rgba(255,77,94,.40);
+  font-size:17px; color:var(--live); white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.4);
+}
+.stall-dot{
+  display:inline-block; width:9px; height:9px; border-radius:50%;
+  background:var(--live); margin-right:10px; vertical-align:middle;
+  animation:stallpulse 1.4s ease-in-out infinite;
+}
+@keyframes stallpulse{ 0%,100%{ opacity:1; } 50%{ opacity:.2; } }
+/* Sits over the video wherever the video happens to be. */
+/* Up from a fullscreen picture reaches it, and OK jumps back to live. */
+#stall-warn.focused{
+  background:var(--accent); border-color:var(--accent); color:#fff;
+  box-shadow:0 10px 30px rgba(0,0,0,.5);
+}
+#stall-warn.focused .stall-dot{ background:#fff; }
+#stall-hint{
+  display:none; margin-left:14px; padding-left:14px;
+  border-left:1px solid rgba(255,255,255,.45);
+  font-size:16px; font-weight:600; font-style:normal; letter-spacing:.04em;
+}
+#stall-warn.focused #stall-hint{ display:inline; }
+
+#stage.playing-full #stall-warn{ left:70px; top:40px; }
+#stage:not(.playing-full) #stall-warn{ left:904px; top:24px; }
+
+/* --- broadcast-time readout while timeshifted --- */
+#ts-clock{
+  position:absolute; top:40px; right:70px; z-index:6;
+  padding:12px 26px 14px; border-radius:16px;
+  /* Broadcasters put their own logo bug up here, so this has to be solid
+     enough to read over one rather than blending into it. */
+  background:rgba(6,8,12,.88); border:1px solid rgba(255,255,255,.10);
+  text-align:right; white-space:nowrap;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+.ts-day{
+  display:block; font-size:16px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent);
+}
+.ts-time{ display:block; font-size:40px; font-weight:600; line-height:46px; }
+/* Only meaningful over fullscreen video. */
+#stage:not(.playing-full) #ts-clock{ display:none; }
+
+/* ============================ OSD ============================ */
+#osd{
+  position:absolute; left:0; right:0; bottom:0; height:344px; padding:38px 70px; z-index:6;
+  /* Text over a picture is only as readable as what is behind it, and a live
+     broadcast can be anything. Nearly solid at the bottom, fading out at the
+     top so it still reads as an overlay rather than a black band. */
+  background:linear-gradient(to top, rgba(4,6,10,.985) 0%, rgba(4,6,10,.96) 42%,
+              rgba(4,6,10,.80) 74%, rgba(4,6,10,0) 100%);
+  text-shadow:0 2px 6px rgba(0,0,0,.65);
+}
+.osd-row{ position:relative; height:268px; }   /* fits the six rows below, at the sizes they are */
+/* Centred on the block of text rather than sitting on top of it, and as large
+   as the column allows: 180px against the text's 196px margin leaves a 16px
+   gap, so nothing else has to move. `contain` means a wide logo still lays out
+   at 180px across — the height is what a square one gains. */
+.osd-logo{
+  position:absolute; left:0; top:50%; margin-top:-90px; width:180px; height:180px;
+  background-position:center; background-repeat:no-repeat; background-size:contain;
+}
+.osd-text{ margin-left:196px; margin-right:220px; }
+#osd.no-logo .osd-text{ margin-left:0; }
+.osd-num{ font-size:20px; color:var(--text-dim); letter-spacing:.14em; }
+.osd-name{ font-size:42px; font-weight:600; margin-top:4px;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.osd-now{ font-size:24px; color:var(--text); margin-top:12px;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* How long is left, against the right edge of the same line as the times. */
+.osd-left{ float:right; margin-left:24px; color:var(--text-dim); }
+/* What the guide says the programme is: the line people actually read, so it
+   is sized to be read over a moving picture rather than squeezed in under the
+   title. A measure short enough to track from one line to the next, and a
+   two-line clamp that ends in an ellipsis instead of slicing a line in half
+   (max-height alone cut the second line through the middle of the letters). */
+.osd-desc{
+  margin-top:12px; font-size:23px; line-height:31px; color:var(--text-mid);
+  max-width:1080px; max-height:62px; overflow:hidden;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+}
+/* No description is not the same as an empty line of one. */
+.osd-desc:empty{ display:none; }
+.osd-bar{ height:5px; background:rgba(255,255,255,.16); border-radius:3px; margin-top:12px; overflow:hidden; }
+.osd-bar i{ display:block; height:100%; width:0; background:var(--accent); }
+/* What is on next is worth finding at a glance (hence the label), but it is
+   not what is on. It sits a notch under the programme playing in both size
+   and brightness, or the eye lands on the wrong one of the two. */
+.osd-next{ font-size:20px; color:var(--text-dim); margin-top:14px;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.osd-next-tag{
+  display:inline-block; margin-right:14px; padding:2px 11px 3px;
+  border-radius:9px; background:var(--accent); color:#fff;
+  font-size:15px; font-weight:600; font-style:normal; letter-spacing:.12em;
+  text-transform:uppercase; vertical-align:middle;
+}
+/* The overlays that sit over video keep the dark palette in both themes. The
+   scrim behind them is dark whatever the theme is (a broadcast picture is not
+   going to turn white to suit it), so a light-theme text colour here would be
+   very nearly black on very nearly black. */
+html.light #osd,
+html.light #zap,
+html.light #ts-clock{
+  --text:      #e8ecf3;
+  --text-dim:  #8b93a4;
+  --text-dim2: #5d6474;
+  --text-mid:  #c3cad6;
+  --accent:    #4c8dff;
+  color:var(--text);
+}
+html.light .osd-next-tag{ color:#fff; }
+.osd-clock{ position:absolute; right:0; top:0; font-size:38px; font-weight:300; color:var(--text); }
+
+#zap{
+  position:absolute; right:70px; top:60px; padding:18px 34px; z-index:6;
+  background:rgba(6,8,12,.88); border:1px solid var(--line); border-radius:14px;
+  font-size:46px; font-weight:600; letter-spacing:.06em;
+}
+
+/* --- timeshift scrubber ---
+   In flow above the info row, not layered over it: the OSD simply grows. */
+#osd.seeking{
+  height:468px;
+  /* Taller box, so the scrim has to reach further up or the scrubber ends up
+     sitting on bright video. */
+  background:linear-gradient(to top, rgba(4,6,10,.98) 0%, rgba(4,6,10,.96) 46%,
+              rgba(4,6,10,.88) 72%, rgba(4,6,10,.45) 90%, rgba(4,6,10,0) 100%);
+}
+.osd-seek{ position:relative; height:126px; margin-bottom:26px; }
+.seek-head{ margin-bottom:18px; white-space:nowrap; }
+.seek-target{ font-size:52px; font-weight:600; letter-spacing:.01em; vertical-align:middle; }
+.seek-delta{ font-size:24px; color:var(--accent); margin-left:20px; vertical-align:middle; }
+.seek-day{ font-size:22px; color:var(--text-dim); margin-left:18px; vertical-align:middle; }
+.seek-line{
+  position:relative; height:6px; border-radius:3px;
+  background:rgba(255,255,255,.18); overflow:visible;
+}
+.seek-line i{ display:block; height:100%; width:0; border-radius:3px; background:var(--accent); }
+.seek-line b{
+  position:absolute; top:-7px; width:20px; height:20px; margin-left:-10px;
+  border-radius:50%; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.5);
+}
+.seek-scale{
+  margin-top:12px; font-size:18px; color:var(--text-dim); white-space:nowrap;
+}
+.seek-scale span:last-child{ float:right; }
+
+/* A clearer marker for what the OSD is showing. */
+.osd-live{
+  display:inline-block; margin-left:14px; padding:2px 10px; border-radius:100px;
+  font-size:15px; letter-spacing:.08em; vertical-align:middle;
+  background:var(--live); color:#fff;
+}
+.osd-live.replay{ background:var(--accent); }
+
+/* ============================ SETTINGS ============================ */
+.settings-wrap{ position:absolute; left:200px; top:130px; width:1100px; }
+.settings-wrap h1{ font-size:52px; font-weight:600; margin-bottom:44px; }
+#settings-list{ position:relative; height:790px; overflow:hidden; }
+#settings-inner{ position:absolute; top:0; left:0; right:0; transition:transform .12s ease-out; }
+.set-row{
+  position:relative; height:92px; padding:17px 26px 0; margin-bottom:1px;
+  border-radius:14px; white-space:nowrap;
+}
+.set-row:after{
+  content:""; position:absolute; left:26px; right:26px; bottom:0; height:1px;
+  background:rgba(255,255,255,.09);
+}
+html.light .set-row:after{ background:rgba(0,0,0,.10); }
+/* The rows Advanced brings out, set in from the everyday ones. */
+.set-row.adv{ padding-left:56px; }
+.set-row.adv:before{
+  content:""; position:absolute; left:28px; top:20px; bottom:20px; width:3px;
+  border-radius:2px; background:var(--line);
+}
+.set-row.adv.focused:before{ background:rgba(255,255,255,.55); }
+.set-row.focused{ background:var(--accent); }
+.set-row.focused:after{ display:none; }
+.set-label{ display:block; line-height:32px; font-size:26px; }
+.set-sub{ display:block; font-size:18px; line-height:22px; color:var(--text-dim); }
+.set-row.focused .set-sub{ color:rgba(255,255,255,.82); }
+.set-value{ float:right; line-height:32px; font-size:24px; color:var(--text-dim); }
+.set-row.focused .set-value{ color:#fff; }
+
+/* ============================ SIDE MENU ============================ */
+#sidemenu{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:8;
+  background:rgba(6,8,12,.58);
+}
+html.light #sidemenu{ background:rgba(20,24,33,.34); }
+.sm-panel{
+  position:absolute; top:0; left:0; width:580px; height:1080px;
+  background:var(--bg-2); border-right:1px solid var(--line); padding-top:44px;
+}
+.sm-brand{
+  font-size:26px; letter-spacing:.18em; text-transform:uppercase;
+  color:var(--text-dim); padding:0 36px 30px;
+}
+.sm-row{
+  position:relative; height:88px; line-height:88px; margin:0 14px; padding:0 22px;
+  border-radius:14px; font-size:30px; color:var(--text);
+}
+/* The same hairline the settings list has, for the same reason: a column of
+   evenly spaced words is hard to count from across a room. */
+.sm-row:after{
+  content:""; position:absolute; left:24px; right:24px; bottom:0; height:1px;
+  background:rgba(255,255,255,.09);
+}
+html.light .sm-row:after{ background:rgba(0,0,0,.10); }
+.sm-row:last-child:after{ display:none; }
+.sm-row.focused{ background:var(--accent); color:#fff; }
+.sm-row.focused:after{ display:none; }
+.sm-foot{
+  position:absolute; left:38px; right:38px; bottom:30px;
+  font-size:16px; color:var(--text-dim2);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* ============================ CHANNEL NUMBERS ============================ */
+#view-numbers{ background:var(--bg); }
+.nm-head{ position:absolute; left:0; right:0; top:0; height:150px; padding:44px 70px 0; }
+.nm-title{ font-size:38px; font-weight:600; }
+.nm-sub{ font-size:20px; color:var(--text-dim); margin-top:10px; }
+.nm-sub .k{ margin:0 6px; }
+.nm-count{ position:absolute; right:70px; top:56px; font-size:20px; color:var(--text-dim2); }
+.nm-scroller{
+  position:absolute; left:56px; right:56px; top:150px; bottom:40px; overflow:hidden;
+}
+#nm-list{ position:relative; }
+.nm-row{
+  position:absolute; left:0; right:0; height:84px; line-height:84px; padding:0 24px;
+  border-radius:14px; white-space:nowrap; cursor:pointer;
+}
+.nm-row:after{
+  content:""; position:absolute; left:24px; right:24px; bottom:0; height:1px;
+  background:rgba(255,255,255,.07);
+}
+html.light .nm-row:after{ background:rgba(0,0,0,.09); }
+.nm-row.focused{ background:var(--accent); }
+.nm-row.focused:after{ display:none; }
+.nm-num{
+  display:inline-block; width:120px; font-size:30px; color:var(--text-dim);
+  text-align:right; margin-right:36px;
+}
+.nm-row.custom .nm-num{ color:var(--fav); }
+.nm-row.focused .nm-num{ color:#fff; }
+.nm-logo{
+  display:inline-block; width:58px; height:42px; margin-right:22px;
+  vertical-align:middle; border-radius:6px;
+  background-position:center; background-repeat:no-repeat; background-size:contain;
+}
+.nm-logo.blank{ background-color:rgba(255,255,255,.05); }
+html.light .nm-logo.blank{ background-color:rgba(0,0,0,.06); }
+.nm-row.focused .nm-logo.blank{ background-color:rgba(255,255,255,.18); }
+.nm-name{ font-size:26px; color:var(--text); }
+.nm-row.focused .nm-name{ color:#fff; }
+.nm-tag{
+  float:right; font-size:18px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--fav);
+}
+.nm-row.focused .nm-tag{ color:rgba(255,255,255,.85); }
+
+/* ============================ CATCH-UP ============================ */
+.tizen #view-replay{ background:var(--bg); }
+
+.rp-left{
+  position:absolute; left:0; top:0; width:420px; height:1080px;
+  background:var(--bg-2); border-right:1px solid var(--line);
+}
+.rp-days-box{ position:absolute; top:96px; bottom:64px; left:0; right:0; overflow:hidden; }
+#rp-days{ position:relative; }
+.rp-day{
+  position:relative; height:76px; padding:14px 26px 0; border-radius:14px;
+  margin:0 10px; white-space:nowrap;
+}
+.rp-day.selected{ background:var(--bg-3); }
+.rp-day.focused{ background:var(--accent); }
+.rp-day-name{ display:block; font-size:24px; line-height:28px; color:var(--text); }
+.rp-day-date{ display:block; font-size:17px; line-height:20px; color:var(--text-dim); }
+.rp-day.focused .rp-day-date{ color:rgba(255,255,255,.82); }
+.rp-day-count{
+  float:right; margin-left:14px; line-height:48px; font-size:18px; color:var(--text-dim2);
+}
+.rp-day.focused .rp-day-count{ color:rgba(255,255,255,.8); }
+
+.rp-right{ position:absolute; left:420px; right:0; top:0; height:1080px; }
+.rp-title{
+  display:inline-block; line-height:96px; font-size:26px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; max-width:900px; vertical-align:top;
+}
+.rp-scroller{ position:absolute; left:0; right:0; top:96px; bottom:0; padding:0 40px; overflow:hidden; }
+#rp-list{ position:relative; }
+
+.rp-prog{
+  position:relative; height:84px; padding:15px 22px 0; border-radius:14px;
+  border-bottom:1px solid rgba(35,40,51,.5); white-space:nowrap;
+}
+.rp-prog.focused{ background:var(--accent); border-bottom-color:transparent; }
+.rp-time{
+  display:inline-block; width:92px; font-size:22px; line-height:28px;
+  color:var(--text-dim); vertical-align:top;
+}
+.rp-prog.focused .rp-time{ color:#fff; }
+.rp-body{ display:inline-block; vertical-align:top; width:900px; }
+.rp-name{
+  display:block; font-size:24px; line-height:28px; color:var(--text-dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.rp-sub{ display:block; font-size:17px; line-height:22px; color:var(--text-dim2); }
+.rp-prog.focused .rp-name, .rp-prog.focused .rp-sub{ color:#fff; }
+
+/* Replayable: the triangle is drawn, never a character. */
+.rp-prog.replay .rp-name{ color:var(--text); }
+.rp-prog.replay .rp-name:after{
+  content:""; display:inline-block; margin-left:12px; vertical-align:middle;
+  width:0; height:0; border-left:10px solid var(--accent);
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+}
+.rp-prog.focused.replay .rp-name:after{ border-left-color:#fff; }
+.rp-prog.now .rp-name{ color:var(--text); font-weight:600; }
+.rp-prog.now .rp-time{ color:var(--live); }
+.rp-prog.gone .rp-name, .rp-prog.gone .rp-time{ opacity:.4; }
+.rp-prog.future .rp-name, .rp-prog.future .rp-time{ opacity:.55; }
+
+.rp-empty{
+  position:absolute; top:300px; left:0; right:0; text-align:center;
+  font-size:24px; color:var(--text-dim2);
+}
+
+/* ============================ SERIES ============================ */
+.tizen #view-series{ background:var(--bg); }
+
+.sr-left{
+  position:absolute; left:0; top:0; width:620px; height:1080px;
+  background:var(--bg-2); border-right:1px solid var(--line);
+}
+.sr-poster{
+  position:absolute; left:100px; top:110px; width:420px; height:630px;
+  background-color:var(--bg-3); border-radius:16px;
+  background-position:center; background-repeat:no-repeat; background-size:cover;
+}
+.sr-right{ position:absolute; left:620px; right:0; top:0; height:1080px; }
+
+.sr-head{ padding:58px 70px 0; }
+.sr-title{
+  font-size:46px; font-weight:600;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.sr-meta{ font-size:20px; color:var(--text-dim); margin-top:14px; min-height:24px; }
+.sr-plot{
+  font-size:20px; line-height:1.5; color:var(--text-dim);
+  margin-top:18px; height:90px; overflow:hidden;
+}
+
+.sr-seasons{ padding:24px 70px 0; font-size:0; white-space:nowrap; overflow:hidden; }
+.sr-season{
+  display:inline-block; font-size:21px; line-height:50px; padding:0 26px; margin-right:14px;
+  border-radius:10px; background:var(--bg-3); color:var(--text-dim);
+  border:2px solid transparent;
+}
+.sr-season.active{ color:var(--text); border-color:var(--line); }
+.sr-season.focused{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+.sr-ep-scroller{
+  position:absolute; left:0; right:0; top:392px; bottom:0;
+  padding:0 70px; overflow:hidden;
+}
+#sr-episodes{ position:relative; }
+.sr-ep{
+  height:92px; padding:16px 24px 0; border-radius:12px;
+  border-bottom:1px solid rgba(35,40,51,.55); white-space:nowrap;
+}
+.sr-ep.focused{ background:var(--accent); border-bottom-color:transparent; }
+.sr-ep-num{
+  display:inline-block; width:70px; line-height:30px; font-size:20px;
+  color:var(--text-dim2); vertical-align:top;
+}
+.sr-ep.focused .sr-ep-num{ color:rgba(255,255,255,.7); }
+.sr-ep-text{ display:inline-block; vertical-align:top; width:860px; }
+.sr-ep-title{
+  display:block; font-size:25px; line-height:30px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.sr-ep-sub{
+  display:block; font-size:18px; line-height:22px; color:var(--text-dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.sr-ep.focused .sr-ep-sub{ color:rgba(255,255,255,.82); }
+.sr-ep-dur{ float:right; line-height:30px; font-size:19px; color:var(--text-dim2); }
+.sr-ep.focused .sr-ep-dur{ color:rgba(255,255,255,.75); }
+
+.sr-empty{
+  position:absolute; top:600px; left:0; right:0; text-align:center;
+  font-size:24px; color:var(--text-dim2);
+}
+
+/* ============================ OVERLAYS ============================ */
+#loader{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:9;
+  background:rgba(6,8,12,.86); text-align:center;
+}
+.loader-box{ position:absolute; top:50%; left:50%; width:640px; margin:-90px 0 0 -320px; }
+#loader-text{ font-size:26px; color:var(--text); margin-top:28px; }
+.progress{ height:4px; width:420px; margin:26px auto 0; background:var(--bg-3); border-radius:2px; overflow:hidden; }
+.progress i{ display:block; height:100%; width:0; background:var(--accent); transition:width .2s linear; }
+
+.spinner{
+  display:inline-block; width:46px; height:46px; border-radius:50%;
+  border:4px solid rgba(255,255,255,.14); border-top-color:var(--accent);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+#stage.playing-full #toast{ bottom:330px; }
+#toast{
+  position:absolute; left:50%; bottom:80px; z-index:9; transform:translateX(-50%);
+  padding:20px 40px; background:rgba(6,8,12,.94); border:1px solid var(--line);
+  border-radius:14px; font-size:23px; max-width:1100px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+#confirm{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:10;
+  background:rgba(6,8,12,.86);
+}
+.confirm-box{
+  position:absolute; top:50%; left:50%; width:760px; margin:-140px 0 0 -380px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:18px; padding:50px;
+}
+#confirm-text{ font-size:28px; line-height:1.4; margin-bottom:44px; }
+.confirm-actions{ text-align:right; font-size:0; }
+.confirm-actions .btn{ margin:0 0 0 16px; }
