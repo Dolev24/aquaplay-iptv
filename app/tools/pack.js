@@ -22,7 +22,7 @@ const zlib = require('zlib');
 
 const ROOT = path.resolve(__dirname, '..');
 /* Same list as build.sh: lib/, tools/ and node_modules never reach the TV. */
-const STAGE = ['config.xml', 'index.html', 'icon.png', 'css', 'js'];
+const STAGE = ['config.xml', 'index.html', 'icon.png', 'css', 'img', 'js'];
 
 const manifest = fs.readFileSync(path.join(ROOT, 'config.xml'), 'utf8');
 /* the widget element's version, not the XML declaration's */

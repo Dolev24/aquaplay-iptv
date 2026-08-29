@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- From API 26 a launcher draws the icon itself: it takes these two layers,
+     masks them to whatever shape it likes, and may parallax them. An app that
+     supplies only a legacy PNG gets that PNG shrunk into the middle of a
+     generated shape instead, which is why the icon looked small next to
+     everything around it. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_foreground" />
+</adaptive-icon>

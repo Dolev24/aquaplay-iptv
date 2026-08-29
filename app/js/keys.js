@@ -1,9 +1,21 @@
-/* keys.js — Samsung remote + desktop keyboard, mapped to one action vocabulary.
+/* keys.js — three remotes, one action vocabulary.
 
    Actions: up down left right ok back exit
             chanUp chanDown playPause stop rew ff
             red green yellow blue info guide
-            digit (with .digit), char (with .key) */
+            digit (with .digit), char (with .key)
+
+   Samsung sends everything to the page once the key is registered, and a
+   desktop keyboard has its own row of stand-ins. Android TV is split in two:
+   the D-pad, Enter and the number keys reach the WebView as ordinary DOM
+   keydowns and are handled here like any other, while BACK, the media
+   transport, the coloured buttons and INFO/GUIDE never arrive — Android
+   consumes them before the page sees them. The shell intercepts those in
+   dispatchKeyEvent and calls K.inject() with the action it decided on, so
+   they rejoin the vocabulary at the same place everything else does.
+
+   That is why the Android map lives in Kotlin rather than here: only the
+   shell is in a position to see those keys at all. */
 (function (w) {
   'use strict';
 
@@ -32,6 +44,20 @@
   var handler = null;
   K.setHandler = function (fn) { handler = fn; };
 
+  /* The way in for a key the page was never shown. The shell has already
+     turned an Android keycode into one of the actions above, so there is
+     nothing to translate — but it is also the only caller that can hand us an
+     action nobody has heard of, so an unknown one is dropped rather than
+     passed on to a handler that will not know what to do with it. */
+  K.ACTIONS = ('up down left right ok back exit chanUp chanDown play pause ' +
+               'playPause stop rew ff red green yellow blue info guide home end ' +
+               'digit').split(' ');
+
+  K.inject = function (action, digit) {
+    if (K.ACTIONS.indexOf(action) === -1) { U.log('unknown injected key', action); return; }
+    dispatch({ action: action, digit: +digit || 0 });
+  };
+
   var TIZEN_KEYS = [
     'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
     'ChannelUp', 'ChannelDown',
@@ -42,6 +68,12 @@
   ];
 
   K.init = function () {
+    if (U.isAndroid) {
+      /* The shell needs somewhere to deliver what it intercepts, and it is
+         allowed to arrive before or after this runs. */
+      w.AquaPlayShell = w.AquaPlayShell || {};
+      w.AquaPlayShell.key = K.inject;
+    }
     if (U.isTizen) {
       for (var i = 0; i < TIZEN_KEYS.length; i++) {
         try { w.tizen.tvinputdevice.registerKey(TIZEN_KEYS[i]); }
@@ -54,6 +86,9 @@
   K.exitApp = function () {
     if (U.isTizen) {
       try { w.tizen.application.getCurrentApplication().exit(); return; } catch (e) {}
+    }
+    if (U.isAndroid) {
+      try { w.AquaPlayNative.exitApp(); return; } catch (e) {}
     }
     U.toast('Exit');
   };
@@ -77,8 +112,8 @@
       return;
     }
 
-    // Desktop letter shortcuts (never while typing)
-    if (!action && !U.isTizen && !typingInInput()) {
+    // Desktop letter shortcuts (never while typing, never on a TV)
+    if (!action && !U.isTV && !typingInInput()) {
       var ch = String.fromCharCode(code).toLowerCase();
       if (CHAR_MAP[ch]) { dispatch({ action: CHAR_MAP[ch], ev: ev }); return; }
     }
@@ -99,7 +134,8 @@
     if (e.ev) { e.ev.preventDefault(); e.ev.stopPropagation(); }
     // Any key dismisses the keyboard reference.
     if (U.helpOpen) { U.helpClose(); return; }
-    if (e.action === 'help') { if (!U.isTizen) U.help(); return; }
+    if (e.action === 'help') { if (!U.isTV) U.help(); return; }
+    if (U.pickOpen) { U.pickKey(e); return; }
     if (U.confirmOpen) { U.confirmKey(e.action); return; }
     if (U.numberOpen) { U.numberKey(e); return; }
     if (handler) handler(e);

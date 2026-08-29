@@ -17,7 +17,9 @@
   --heart:     #ff3b5c;
   --live:      #ff4d5e;
   --row-alt:   rgba(255,255,255,.035);
-  --row-h:     76px;
+  --row-h:     92px;   /* ten channels in the 920px scroller, and room for a
+                          logo worth looking at. ROW_H in views/channels.js
+                          must match it — nothing checks that they agree. */
 }
 
 *{ margin:0; padding:0; box-sizing:border-box; }
@@ -41,28 +43,31 @@ html,body{
 
 /* Light theme: the panes invert, the video overlays stay dark because they
    sit on top of a picture, not on a background. */
-/* Light, not white. A TV is a lamp: a white panel across 55 inches in a dim
-   room is painful to sit in front of, so nothing in here is white. The palette
-   is a soft grey-blue paper, taken down a second time after the first attempt
-   still read as glare, with the text dark enough that the contrast stays well
-   clear of what the surfaces gave up. */
+/* Light, not white — and after three goes at it, barely light. A television
+   is a lamp: 55 inches of pale grey-blue in a dim room is still glare, which
+   is what the first two attempts got wrong by trying to stay bright. This is
+   a mid grey-blue with black text on it: 9:1 contrast, nothing luminous, and
+   nothing that makes you squint at eleven at night.
+
+   The overlays over video keep the dark palette regardless — see the
+   html.light #osd rule further down. */
 html.light{
-  --bg:        #ccd3df;
-  --bg-2:      #d9dfe9;   /* raised: panels and inputs, still the lightest thing */
-  --bg-3:      #bfc8d6;
-  --line:      #a9b4c4;
-  --text:      #10141d;
-  --text-dim:  #454e5d;
-  --text-dim2: #69737f;
-  --text-mid:  #2c3444;
-  --accent:    #2b64cf;
-  --accent-dim:#b6cbee;
-  --fav:       #b06c00;
-  --heart:     #cc1c34;
-  --live:      #bc1c30;
-  --row-alt:   rgba(16,24,40,.05);
+  --bg:        #b4bdcb;
+  --bg-2:      #c1c9d6;   /* raised: panels and inputs, still the lightest thing */
+  --bg-3:      #a3adbc;
+  --line:      #8e9aac;
+  --text:      #0d1017;
+  --text-dim:  #39424f;
+  --text-dim2: #59636f;
+  --text-mid:  #262d3b;
+  --accent:    #23509f;
+  --accent-dim:#9ab2dd;
+  --fav:       #96590a;
+  --heart:     #b31530;
+  --live:      #a5142a;
+  --row-alt:   rgba(10,16,28,.07);
 }
-html.light body{ background:#c2cad7; }
+html.light body{ background:#a9b3c2; }
 html.light .ch-row:after{ background:rgba(0,0,0,.07); }
 html.light .ch-prog{ background:rgba(0,0,0,.12); }
 html.light .pm-bar{ background:rgba(0,0,0,.12); }
@@ -78,9 +83,10 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 .field input{ cursor:text; }
 
 /* Video sits ABOVE the panes in a browser (it is a real <video> node) and is
-   moved/resized to whatever region should show it. On Tizen the AVPlay plane
-   is behind the page instead, so there the page must be transparent wherever
-   video should appear — see the .tizen rules below. */
+   moved/resized to whatever region should show it. On a TV the decoder draws
+   behind the page instead — AVPlay's plane on Tizen, ExoPlayer's surface under
+   the WebView on Android — so there the page must be transparent wherever
+   video should appear. See the .tv rules below. */
 #video-layer{
   position:absolute; top:0; left:0; width:1920px; height:1080px;
   background:#000; z-index:5;
@@ -92,11 +98,12 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 
 .view{ position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:1; }
 
-/* Tizen: nothing opaque may sit over the hardware video plane. Each pane
-   paints its own background instead of one big backdrop. */
-.tizen #stage{ background:transparent; }
-.tizen #video-layer{ background:transparent; z-index:0; }
-.tizen #view-setup, .tizen #view-settings{ background:var(--bg); }
+/* On a TV nothing opaque may sit over the video underneath. Each pane paints
+   its own background instead of one big backdrop, so the panes that should
+   cover the picture still do and the ones that should not, do not. */
+.tv #stage{ background:transparent; }
+.tv #video-layer{ background:transparent; z-index:0; }
+.tv #view-setup, .tv #view-settings{ background:var(--bg); }
 
 /* ============================ SETUP ============================ */
 .setup-wrap{ position:absolute; left:200px; top:130px; width:820px; }
@@ -147,6 +154,22 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
   height:96px; padding:0 30px; border-bottom:1px solid var(--line);
   position:relative; white-space:nowrap;
 }
+/* The head of the channel list carries two lines rather than one: the time,
+   which is the other thing a television is looked at for, and under it the
+   name of the list. Taller for it, and the scroller starts lower to match. */
+#channels .pane-head{ height:132px; }
+.head-clock{
+  display:inline-block; line-height:56px; margin-top:14px;
+  font-size:42px; font-weight:300; color:var(--text); letter-spacing:.02em;
+}
+.head-date{
+  display:inline-block; margin-left:20px; line-height:56px; margin-top:14px;
+  font-size:22px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.10em;
+}
+.pane-title.under{
+  display:block; line-height:34px; margin-top:-8px; max-width:600px;
+}
+#channels .count{ line-height:132px; }
 .pane-title{
   display:inline-block; line-height:96px; font-size:22px; color:var(--text-dim);
   text-transform:uppercase; letter-spacing:.14em; overflow:hidden;
@@ -155,15 +178,32 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 
 /* --- groups rail --- */
 /* The rail folds away when the cursor leaves it, giving the channel list the
-   width, and slides back when the cursor returns. A sliver stays behind: a
-   drawer with no handle is a drawer nobody opens. */
-#groups{ transition:width .18s ease; overflow:hidden; }
-#channels{ transition:left .18s ease; }
+   width, and comes back when the cursor returns. A sliver stays behind: a
+   drawer with no handle is a drawer nobody opens.
+
+   It does not animate, and that is the second thing tried rather than the
+   first. It was 180ms, then 110ms, and both looked laggy for a reason a
+   duration cannot fix: the same keypress that folds the rail also re-renders
+   the list, so the transition's clock runs while the main thread is busy and
+   the first frame the viewer sees is already a third of the way through. The
+   trace showed frames at 3ms and 7ms and then nothing until 21ms, by which
+   point the rail had jumped from 39px to 90px. On a television, where that
+   re-render costs ten times as much, the jump is the whole animation.
+
+   A transform would have been immune to it — compositor animations do not
+   care what the main thread is doing — but this fold cannot be expressed as
+   one. The channel list does not slide out of the way, it takes the width;
+   254px of it, which is a layout change whatever property asks for it.
+
+   So there is nothing to fall behind. One paint. */
+#groups{ overflow:hidden; }
 #stage.rail-in #groups{ width:26px; }
 #stage.rail-in #channels{ left:26px; }
 /* Folded, the rail shows nothing but the handle: a sliver of half-clipped
-   group names reads as a rendering fault rather than as a drawer. */
-#stage.rail-in #groups > *{ opacity:0; transition:opacity .12s ease; }
+   group names reads as a rendering fault rather than as a drawer. Hidden
+   outright rather than faded, for the same reason as above — a fade is one
+   more thing waiting on a main thread that is busy. */
+#stage.rail-in #groups > *{ opacity:0; }
 #stage.rail-in #groups:after{
   content:""; position:absolute; right:7px; top:50%; margin-top:-10px;
   width:0; height:0; border-left:10px solid var(--text-dim);
@@ -205,10 +245,6 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 .sec.focused{ background:var(--accent); color:#fff; }
 #groups.has-sections #group-scroller{ top:162px; }
 
-#rail-search{ bottom:64px; }
-.rail-mag{ margin:0 16px 0 2px; vertical-align:middle; }
-.rail-hint.focused .rail-mag:before{ border-color:#fff; }
-.rail-hint.focused .rail-mag:after{ background:#fff; }
 .rail-hint{
   position:absolute; bottom:0; left:0; right:0; height:64px; line-height:64px;
   padding:0 24px; font-size:17px; color:var(--text-dim2);
@@ -216,25 +252,41 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 }
 .rail-hint.focused{ background:var(--accent); color:#fff; }
 .rail-hint.focused .hint-arrow{ border-right-color:#fff; }
-.rail-hint.focused .dots, .rail-hint.focused .dots:before,
-.rail-hint.focused .dots:after{ background:#fff; }
+.rail-hint.focused .sliders, .rail-hint.focused .sliders:before,
+.rail-hint.focused .sliders:after{ background:#fff; }
+.rail-hint.focused .sliders{ box-shadow:0 7px 0 #fff, 0 14px 0 #fff; }
+.rail-hint.focused .sliders:before{ box-shadow:0 14px 0 #fff; }
 .rail-hint b{ color:var(--text-dim); margin-right:8px; }
 .hint-arrow{
   display:inline-block; vertical-align:middle; margin-right:12px;
   width:0; height:0; border-right:9px solid var(--text-dim);
   border-top:6px solid transparent; border-bottom:6px solid transparent;
 }
-/* The three dots a menu has everywhere else, drawn rather than typed. */
-.rail-hint .dots{
-  position:relative; display:inline-block; width:4px; height:4px;
-  margin:0 18px 0 4px; vertical-align:middle;
-  background:var(--text-dim); border-radius:50%;
+/* Settings: three sliders, drawn rather than typed.
+
+   It was three dots, which is what a *menu* looks like everywhere and so was
+   promising the wrong thing on a row that opens settings. Six shapes are
+   needed and a span carries three — itself and two pseudo-elements — so the
+   other three are box-shadows of those. Shadows scale, print and recolour
+   exactly like the elements they come from, which is more than can be said
+   for a glyph that may not be in the font.
+
+   The block is 16px tall hanging off a 2px element, so it is pulled up by
+   half of that to sit on the middle of the text beside it. */
+.rail-hint .sliders{
+  position:relative; display:inline-block; width:20px; height:2px;
+  margin:0 16px 0 2px; top:-7px; vertical-align:middle;
+  background:var(--text-dim);
+  box-shadow:0 7px 0 var(--text-dim), 0 14px 0 var(--text-dim);
 }
-.rail-hint .dots:before, .rail-hint .dots:after{
-  content:""; position:absolute; left:0; width:4px; height:4px;
-  background:var(--text-dim); border-radius:50%;
+.rail-hint .sliders:before, .rail-hint .sliders:after{
+  content:""; position:absolute; width:6px; height:6px; border-radius:50%;
+  background:var(--text-dim);
 }
-.rail-hint .dots:before{ left:-7px; }
+/* Top slider and bottom slider share a knob position; the middle one sits
+   further along, which is what makes the shape read as adjustable. */
+.rail-hint .sliders:before{ left:3px; top:-2px; box-shadow:0 14px 0 var(--text-dim); }
+.rail-hint .sliders:after{ left:12px; top:5px; }
 .rail-hint .dots:after{ left:7px; }
 
 /* --- channel list --- */
@@ -263,7 +315,9 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
   position:absolute; right:24px; top:0; line-height:96px; font-size:17px; color:var(--text-dim2);
 }
 
-#channel-scroller{ position:absolute; top:96px; bottom:64px; left:0; right:0; overflow:hidden; }
+/* 132, not 96: the head of this pane carries the clock as well as the name
+   of the list. */
+#channel-scroller{ position:absolute; top:132px; bottom:64px; left:0; right:0; overflow:hidden; }
 #channel-spacer{ position:relative; width:100%; }
 #channel-list{ position:absolute; top:0; left:0; right:0; }
 
@@ -283,38 +337,58 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 }
 .ch-row.focused:after{ display:none; }
 
-/* The channel that is actually playing keeps a marker while you browse away. */
-.ch-row.playing:before{
-  content:""; position:absolute; left:0; top:20px; bottom:20px; width:3px;
-  border-radius:2px; background:var(--live);
-}
-.ch-row.playing .ch-name{ color:var(--accent); font-weight:600; }
-.ch-row.focused.playing .ch-name{ color:#fff; }
-.ch-row.focused.playing:before{ background:#fff; }
+/* The channel that is actually playing keeps a marker while you browse away.
+   It was a red dot at the edge of the row, which is a small thing to find on a
+   list being read from a sofa — the row is outlined in the same red instead,
+   so the marker is the size of the thing it is marking.
 
-/* Sized and coloured to be read, not glanced at. The number was 19px in
-   --text-dim2, which is the dimmest text token the app has, and the programme
-   line was 17px in --text-dim: both are legible to someone with good sight at
-   two metres and to nobody else. There is room in a 76px row for all three
-   lines to grow. */
+   An inset shadow rather than a border: nothing in the row moves when it
+   appears, and it follows the row's own corner radius. The focused row keeps
+   its lift, so a row that is both says both. */
+.ch-row.playing{ box-shadow:inset 0 0 0 3px var(--live); }
+.ch-row.focused.playing{
+  box-shadow:inset 0 0 0 3px var(--live), 0 6px 18px rgba(0,0,0,.35);
+}
+.ch-row.playing .ch-name{ color:var(--accent); }
+.ch-row.focused.playing .ch-name{ color:#fff; }
+
+/* The number is what people dial, so it is read from further away than
+   anything else in the row: 34px semibold in the mid tone, against 19px in the
+   dimmest token the app has when this started. Four digits at this size need
+   78px, and the column stays that wide whatever is in the list — a column that
+   resized itself would be one four-digit numbers have to be trusted to fit. */
 .ch-num{
-  flex:0 0 56px; font-size:24px; color:var(--text-dim);
-  text-align:right; margin-right:14px;
+  flex:0 0 78px; font-size:34px; font-weight:600; color:var(--text-mid);
+  text-align:left; margin-right:14px;
 }
 .ch-row.focused .ch-num{ color:rgba(255,255,255,.86); }
 .ch-num.custom{ color:var(--fav); }
 .ch-row.focused .ch-num.custom{ color:#fff; }
 
+/* As large as the row allows: 70px tall in a 92px row leaves 11px of air above
+   and below, and 96px across fits the wide logos most providers ship without
+   stretching the narrow ones — background-size:contain does the rest. What it
+   costs is name width, and only while the groups rail is open: folded, the list
+   takes the rail's width back and the names have 500px. */
+/* 22px after it rather than 14. The logo sat hard against the channel name,
+   which read as the name belonging to the logo rather than to the row; the
+   name is nudged right instead of the logo being moved left, because moving
+   the logo means taking width off the number column and four-digit numbers
+   need all of it. A small change on purpose — the columns still line up. */
 .ch-logo{
-  flex:0 0 52px; height:38px; margin-right:14px; border-radius:6px;
+  flex:0 0 96px; height:70px; margin-right:22px; border-radius:8px;
   background-position:center; background-repeat:no-repeat; background-size:contain;
 }
 .ch-logo.blank{ background-color:rgba(255,255,255,.05); }
 .ch-row.focused .ch-logo.blank{ background-color:rgba(255,255,255,.18); }
 
 .ch-text{ flex:1 1 auto; min-width:0; }
+/* Semibold, so the channel and the programme under it are told apart by three
+   things rather than two: 25px against 21px, --text against --text-mid, and
+   now weight. At a glance down a list, weight is the one the eye reads first.
+   The row playing keeps the same weight and changes colour instead. */
 .ch-name{
-  display:block; font-size:25px; line-height:30px; color:var(--text);
+  display:block; font-size:25px; line-height:30px; font-weight:700; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .ch-row.focused .ch-name{ color:#fff; }
@@ -333,7 +407,6 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 }
 .ch-fav.on:before{ left:11px; transform:rotate(-45deg); transform-origin:0 100%; }
 .ch-fav.on:after{ left:0; transform:rotate(45deg); transform-origin:100% 100%; }
-.ch-row.focused .ch-fav.on:before, .ch-row.focused .ch-fav.on:after{ background:#fff; }
 /* A padlock out of a box and half a ring, for the same reason as the heart:
    no font on the TV is guaranteed to own the glyph. Only ever drawn while the
    session is unlocked — otherwise the channel is not in the list at all. */
@@ -366,7 +439,10 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
   padding:0 14px; border-top:1px solid var(--line); white-space:nowrap; font-size:0;
   overflow:hidden;   /* clip rather than push the layout if a font runs wide */
 }
-.act{ display:inline-block; font-size:15px; color:var(--text-dim); margin-right:10px; }
+/* Six buttons in a 600px bar while the rail is open, so they are tight on
+   purpose; the bar clips rather than wraps, and the rail is folded most of
+   the time anyway, which gives it another 254px. */
+.act{ display:inline-block; font-size:15px; color:var(--text-dim); margin-right:9px; }
 .act .k{ margin-right:7px; }
 
 #keyhelp{
@@ -436,7 +512,7 @@ html.light #number{ background:rgba(20,24,33,.5); }
   position:absolute; top:0; left:0; width:1040px; height:585px;
   background:#000; overflow:hidden;
 }
-.tizen .preview-frame{ background:transparent; }
+.tv .preview-frame{ background:transparent; }
 .preview-placeholder{
   position:absolute; top:0; left:0; width:100%; height:100%;
   text-align:center; line-height:585px; font-size:21px; color:var(--text-dim2);
@@ -466,8 +542,9 @@ html.light #number{ background:rgba(20,24,33,.5); }
   background:var(--bg-2); border-left:1px solid var(--line); border-top:1px solid var(--line);
 }
 .preview-meta{ position:absolute; top:0; left:0; right:0; height:122px; padding:22px 32px 0; }
+/* The channel being previewed, named once and read from across the room. */
 .pm-name{
-  font-size:30px; font-weight:600; line-height:36px;
+  font-size:38px; font-weight:700; line-height:44px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .pm-now{ font-size:19px; margin-top:7px; min-height:24px; overflow:hidden; white-space:nowrap; }
@@ -534,19 +611,17 @@ html.light .epg-track{ background:rgba(0,0,0,.13); }
   position:relative; height:60px; padding:0 12px;
   border-radius:12px; display:flex; align-items:center;
 }
-/* Three sizes, biggest in the middle: what is on air, then the programme
-   either side of it, then the rest. 20px in --text-dim was a size for glancing
-   at, and the row on air was the same size as the row four hours ago.
-   Everything still fits a 60px row — a 27px name is a 34px line, and the only
-   row that also carries a progress bar is the one on air, at 34 + 3 + 8. */
+/* Two sizes: what is on air, and everything else. 20px in --text-dim was a
+   size for glancing at, and the row on air was the same size as the row four
+   hours ago. Everything still fits a 60px row — a 27px name is a 34px line,
+   and the only row that also carries a progress bar is the one on air, at
+   34 + 3 + 8. */
 .epg-time{ flex:0 0 80px; font-size:20px; line-height:26px; color:var(--text-dim); }
 .epg-body{ flex:1 1 auto; min-width:0; }
 .epg-name{
   display:block; font-size:22px; line-height:28px; color:var(--text-mid);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
-.epg-row.near .epg-name{ font-size:24px; line-height:30px; color:var(--text); }
-.epg-row.near .epg-time{ font-size:21px; }
 /* display:block, because the markup is a <span>: an inline box ignores a
    height, so this bar has been 0px tall and invisible since it was written.
    The channel list's own .ch-prog says display:block for the same reason. */
@@ -599,6 +674,14 @@ html.light .epg-row.now{ background:rgba(0,0,0,.05); }
 }
 .epg-panel.active .epg-row.focused .epg-replay:before{ border-right-color:#fff; }
 .epg-panel.active .epg-row.focused .epg-replay:after{ background:#fff; }
+/* The red dot on the programme that is on air: the same mark the badge over
+   the picture wears, so "on now" looks the same wherever it is said. A circle
+   needs no glyph and no font. */
+.epg-play{
+  display:inline-block; width:12px; height:12px; border-radius:50%;
+  margin-left:14px; vertical-align:1px;
+  background:var(--live);
+}
 /* A bell on a programme somebody asked to be told about. Amber, not the
    accent: it has to be told apart from the replay clock at a glance. */
 .epg-remind{
@@ -692,7 +775,7 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
 }
 .k-red{ background:#e34b5c; } .k-green{ background:#3fb96b; }
 .k-yellow{ background:#e0b73c; } .k-blue{ background:#3f7fd1; }
-.k-ok, .k-back, .k-play{
+.k-ok, .k-back, .k-play, .k-info{
   width:auto; border-radius:5px; padding:2px 8px; font-size:13px; line-height:17px;
   background:var(--bg-3); color:var(--text-dim); border:1px solid var(--line);
 }
@@ -774,7 +857,28 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
 }
 .osd-text{ margin-left:196px; margin-right:220px; }
 #osd.no-logo .osd-text{ margin-left:0; }
-.osd-num{ font-size:20px; color:var(--text-dim); letter-spacing:.14em; }
+/* Inline so the way back to live can sit on the same line as it, rather
+   than dropping to one of its own above the channel name. */
+.osd-num{ display:inline-block; vertical-align:middle;
+          font-size:20px; color:var(--text-dim); letter-spacing:.14em; }
+/* Only there while the bar is up and the channel is wound back. Up puts the
+   cursor on it and OK goes back to live — the same two presses as the
+   stream warning, because it is the same answer to the same question. */
+/* Filled rather than outlined, and 24px rather than 17: this is read from a
+   sofa, over a moving picture, by somebody who has just noticed they are
+   behind. Focus inverts it — a red button that goes slightly redder is not a
+   state change anyone can see from across a room — and the ring is the same
+   red, so the two states are one idea seen twice. */
+.osd-back{
+  display:inline-block; margin-left:22px; padding:6px 26px 8px;
+  border-radius:100px; border:2px solid var(--live); background:var(--live);
+  font-size:24px; font-weight:700; font-style:normal; letter-spacing:.05em;
+  color:#fff; vertical-align:middle;
+}
+.osd-back.focused{
+  background:#fff; color:var(--live);
+  box-shadow:0 0 0 5px rgba(255,77,94,.45);
+}
 .osd-name{ font-size:42px; font-weight:600; margin-top:4px;
            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .osd-now{ font-size:24px; color:var(--text); margin-top:12px;
@@ -818,6 +922,7 @@ html.light #ts-clock{
   --text-dim2: #5d6474;
   --text-mid:  #c3cad6;
   --accent:    #4c8dff;
+  --live:      #ff4d5e;
   color:var(--text);
 }
 html.light .osd-next-tag{ color:#fff; }
@@ -865,8 +970,38 @@ html.light .osd-next-tag{ color:#fff; }
 }
 .osd-live.replay{ background:var(--accent); }
 
+/* The wordmark, drawn from the one PNG in the package that is not a launcher
+   icon. background-size:contain and a fixed height, so every place that shows
+   it picks a size and the aspect looks after itself. */
+.brand-logo{
+  display:inline-block; vertical-align:middle;
+  background-image:url("../img/logo.png");
+  background-repeat:no-repeat; background-position:left center;
+  background-size:contain;
+}
+/* The rail head. 200px against a 280px rail leaves it breathing room on both
+   sides and still reads from across a room. */
+.brand-head{ padding-top:0; }
+.brand-head .brand-logo{ width:200px; height:64px; margin-top:16px; }
+
 /* ============================ SETTINGS ============================ */
-.settings-wrap{ position:absolute; left:200px; top:130px; width:1100px; }
+/* Top left, above the heading, at the same size the rail head shows it: the
+   two screens are one app and should say so in the same voice. */
+.set-brand{
+  position:absolute; left:200px; top:48px; width:200px; height:58px;
+}
+/* And a large one to the right of the rows. 680px against the 420 it started
+   at, which took narrowing the rows: they were 1100 wide and the value floated
+   to the far end of that, so the eye had a very long way to travel from a
+   label to what it was set to. 980 is shorter for both reasons.
+
+   Held a little back from full strength so it stays a backdrop and does not
+   compete with the row that has the cursor. */
+.set-brand-big{
+  position:absolute; right:60px; top:330px; width:680px; height:227px;
+  opacity:.9;
+}
+.settings-wrap{ position:absolute; left:200px; top:130px; width:980px; }
 .settings-wrap h1{ font-size:52px; font-weight:600; margin-bottom:44px; }
 #settings-list{ position:relative; height:790px; overflow:hidden; }
 #settings-inner{ position:absolute; top:0; left:0; right:0; transition:transform .12s ease-out; }
@@ -888,11 +1023,33 @@ html.light .set-row:after{ background:rgba(0,0,0,.10); }
 .set-row.adv.focused:before{ background:rgba(255,255,255,.55); }
 .set-row.focused{ background:var(--accent); }
 .set-row.focused:after{ display:none; }
-.set-label{ display:block; line-height:32px; font-size:26px; }
-.set-sub{ display:block; font-size:18px; line-height:22px; color:var(--text-dim); }
-.set-row.focused .set-sub{ color:rgba(255,255,255,.82); }
-.set-value{ float:right; line-height:32px; font-size:24px; color:var(--text-dim); }
+/* Settings is read from a sofa like everything else, and it was the one
+   screen still written at desktop sizes: a 26px label over an 18px sub-line in
+   the dimmest token the app has. Both go up a size and a contrast step.
+
+   The three rows people actually come here for — which playlist, which
+   language, which theme — are heavier again. Everything else is something you
+   set once and forget, and a list where every row shouts is a list where
+   nothing does. */
+/* Every row is bold. The three that matter — playlist, language, theme — are
+   larger rather than heavier, so there is still a hierarchy: a list where the
+   only difference is weight and everything has it has no hierarchy at all.
+
+   The sub-line lives inside the label element, so it inherits the weight
+   unless told otherwise, and a bold explanation under a bold heading is two
+   headings. It is told otherwise for every row, not just the three. */
+.set-label{
+  display:block; line-height:34px; font-size:27px; font-weight:700; color:var(--text);
+}
+.set-row.key .set-label{ font-size:30px; }
+.set-sub{ font-weight:400; }
+.set-sub{ display:block; font-size:19px; line-height:24px; color:var(--text-mid); }
+.set-row.focused .set-sub{ color:rgba(255,255,255,.86); }
+.set-value{
+  float:right; line-height:34px; font-size:25px; font-weight:600; color:var(--text-mid);
+}
 .set-row.focused .set-value{ color:#fff; }
+.set-row.focused .set-label{ color:#fff; }
 
 /* ============================ SIDE MENU ============================ */
 #sidemenu{
@@ -904,10 +1061,12 @@ html.light #sidemenu{ background:rgba(20,24,33,.34); }
   position:absolute; top:0; left:0; width:580px; height:1080px;
   background:var(--bg-2); border-right:1px solid var(--line); padding-top:44px;
 }
-.sm-brand{
-  font-size:26px; letter-spacing:.18em; text-transform:uppercase;
-  color:var(--text-dim); padding:0 36px 30px;
-}
+/* The drawer used to head itself with the app's name spelled out in letter-
+   spaced capitals, which is a wordmark drawn badly. Now it is the wordmark.
+   240px in a 580px panel leaves it room on both sides and matches the weight
+   the rail head has. */
+.sm-brand{ padding:0 36px 30px; }
+.sm-logo{ width:240px; height:76px; }
 .sm-row{
   position:relative; height:88px; line-height:88px; margin:0 14px; padding:0 22px;
   border-radius:14px; font-size:30px; color:var(--text);
@@ -973,7 +1132,7 @@ html.light .nm-logo.blank{ background-color:rgba(0,0,0,.06); }
 .nm-row.focused .nm-tag{ color:rgba(255,255,255,.85); }
 
 /* ============================ CATCH-UP ============================ */
-.tizen #view-replay{ background:var(--bg); }
+.tv #view-replay{ background:var(--bg); }
 
 .rp-left{
   position:absolute; left:0; top:0; width:420px; height:1080px;
@@ -1039,8 +1198,109 @@ html.light .nm-logo.blank{ background-color:rgba(0,0,0,.06); }
   font-size:24px; color:var(--text-dim2);
 }
 
+/* ============================ TV CATALOGUE ============================ */
+/* Channels down the left, the selected one's whole schedule down the right.
+
+   It was the other way round to begin with — hours on the left, every channel
+   on the right — which answered "what is on at eight". That is a fair
+   question and it was not the one being asked; what people sit down with is a
+   channel and an evening. The two columns swapped, and with them which side
+   has to be windowed: the playlist can be five thousand long, one channel's
+   schedule is tens. */
+.tv #view-catalog{ background:var(--bg); }
+#view-catalog{ background:var(--bg); }
+
+.cg-left{
+  position:absolute; left:0; top:0; width:560px; height:1080px;
+  background:var(--bg-2); border-right:1px solid var(--line);
+}
+.cg-chans-box{ position:absolute; top:96px; bottom:64px; left:0; right:0; overflow:hidden; }
+#cg-chans{ position:relative; }
+
+/* The channel list's own shape, one size down: this column is 560px where
+   the browse list has the width of the screen, and the programme beside the
+   name is not repeated here because the whole right-hand side is that. */
+.cg-chan{
+  position:absolute; left:10px; right:10px; height:84px;
+  display:flex; align-items:center; padding:0 14px;
+  border-radius:14px; white-space:nowrap;
+}
+.cg-chan:after{
+  content:""; position:absolute; left:14px; right:14px; bottom:0; height:1px;
+  background:rgba(255,255,255,.05);
+}
+html.light .cg-chan:after{ background:rgba(0,0,0,.08); }
+.cg-chan.selected{ background:var(--bg-3); }
+.cg-chan.focused{ background:var(--accent); }
+.cg-chan.focused:after, .cg-chan.selected:after{ display:none; }
+/* The channel being watched, the same red outline the browse list uses. */
+.cg-chan.playing{ box-shadow:inset 0 0 0 3px var(--live); }
+
+.cg-num{
+  flex:0 0 66px; font-size:26px; font-weight:600; color:var(--text-mid);
+  text-align:left; margin-right:6px;
+}
+.cg-chan.focused .cg-num{ color:rgba(255,255,255,.86); }
+.cg-logo{
+  flex:0 0 66px; height:52px; margin-right:18px; border-radius:6px;
+  background-position:center; background-repeat:no-repeat; background-size:contain;
+}
+.cg-logo.blank{ background-color:rgba(255,255,255,.05); }
+.cg-chan.focused .cg-logo.blank{ background-color:rgba(255,255,255,.18); }
+.cg-chname{
+  flex:1 1 auto; min-width:0; font-size:24px; font-weight:600; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.cg-chan.focused .cg-chname{ color:#fff; }
+
+.cg-right{ position:absolute; left:560px; right:0; top:0; height:1080px; }
+.cg-scroller{ position:absolute; left:0; right:0; top:96px; bottom:0; padding:0 40px; overflow:hidden; }
+#cg-progs{ position:relative; }
+
+/* A schedule that runs past midnight has to say so, or the times count back
+   to nine in the morning with no explanation. */
+.cg-day{
+  height:56px; line-height:64px; font-size:20px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--text-dim2);
+}
+
+.cg-prog{
+  position:relative; height:88px; padding:16px 22px 0; border-radius:14px;
+  border-bottom:1px solid rgba(35,40,51,.5); white-space:nowrap;
+}
+html.light .cg-prog{ border-bottom-color:rgba(0,0,0,.10); }
+.cg-prog.focused{ background:var(--accent); border-bottom-color:transparent; }
+.cg-ptime{
+  display:inline-block; width:104px; font-size:24px; line-height:30px;
+  color:var(--text-dim); vertical-align:top;
+}
+.cg-pbody{ display:inline-block; vertical-align:top; width:900px; }
+.cg-pname{
+  display:block; font-size:26px; line-height:30px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.cg-psub{ display:block; font-size:18px; line-height:22px; color:var(--text-dim2); }
+.cg-prog.focused .cg-ptime, .cg-prog.focused .cg-pname,
+.cg-prog.focused .cg-psub{ color:#fff; }
+
+/* On air: the same red the rest of the app means "now" with. */
+.cg-prog.now .cg-ptime{ color:var(--live); font-weight:600; }
+.cg-prog.now .cg-pname{ font-weight:700; }
+.cg-prog.focused.now .cg-ptime{ color:#fff; }
+/* Already finished, and still readable — some of it is replayable. */
+.cg-prog.past .cg-ptime, .cg-prog.past .cg-pname, .cg-prog.past .cg-psub{ opacity:.45; }
+
+/* A bell that is drawn, not typed: the rule the heart and the replay clock
+   follow, because no font on a television is guaranteed to own a glyph. */
+.cg-prog.reminded .cg-pname:after{
+  content:""; display:inline-block; vertical-align:middle; margin-left:14px;
+  width:12px; height:12px; border-radius:50% 50% 40% 40%;
+  background:var(--fav);
+}
+.cg-prog.focused.reminded .cg-pname:after{ background:#fff; }
+
 /* ============================ SERIES ============================ */
-.tizen #view-series{ background:var(--bg); }
+.tv #view-series{ background:var(--bg); }
 
 .sr-left{
   position:absolute; left:0; top:0; width:620px; height:1080px;
@@ -1127,18 +1387,70 @@ html.light .nm-logo.blank{ background-color:rgba(0,0,0,.06); }
 #toast{
   position:absolute; left:50%; bottom:80px; z-index:9; transform:translateX(-50%);
   padding:20px 40px; background:rgba(6,8,12,.94); border:1px solid var(--line);
-  border-radius:14px; font-size:23px; max-width:1100px;
+  border-radius:14px; font-size:23px; max-width:1500px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
+
+/* A list to choose from, over whatever asked for it. Sized to the longest
+   thing it has to hold rather than to the screen: this is a choice, not a
+   screen, and it should look like something that will go away again. */
+#picker{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:10;
+  background:rgba(6,8,12,.72);
+}
+.picker-box{
+  position:absolute; left:50%; top:50%; width:620px; margin-left:-310px;
+  margin-top:-330px; padding:34px 0 20px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:20px;
+  box-shadow:0 24px 60px rgba(0,0,0,.55);
+}
+.picker-title{
+  font-size:30px; font-weight:700; color:var(--text); padding:0 38px 22px;
+}
+/* Six rows deep. More than that and it is a screen; fewer and a ten-item
+   list spends its life scrolling. */
+.picker-scroll{ position:relative; height:468px; overflow:hidden; }
+#picker-list{ position:absolute; top:0; left:0; right:0; }
+.picker-row{
+  height:78px; line-height:78px; margin:0 14px; padding:0 24px;
+  border-radius:14px; font-size:27px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.picker-row.focused{ background:var(--accent); color:#fff; }
+.picker-foot{
+  padding:20px 38px 4px; font-size:18px; color:var(--text-dim2);
+  border-top:1px solid var(--line); margin-top:14px;
+}
+.picker-foot span{ margin-right:28px; }
 
 #confirm{
   position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:10;
   background:rgba(6,8,12,.86);
 }
+/* Centred by transform rather than by a fixed negative margin: the box is a
+   different height with a description in it than without one, and half of an
+   unknown height is not a number that can be written down. */
 .confirm-box{
-  position:absolute; top:50%; left:50%; width:760px; margin:-140px 0 0 -380px;
+  position:absolute; top:50%; left:50%; width:860px; transform:translate(-50%, -50%);
   background:var(--bg-2); border:1px solid var(--line); border-radius:18px; padding:50px;
 }
-#confirm-text{ font-size:28px; line-height:1.4; margin-bottom:44px; }
+.confirm-head{ display:flex; align-items:flex-start; margin-bottom:40px; }
+/* Only there when the caller has one, so the text starts at the left edge
+   the rest of the time. */
+.confirm-logo{
+  flex:0 0 150px; height:104px; margin-right:30px; border-radius:10px;
+  background-color:rgba(255,255,255,.05);
+  background-position:center; background-repeat:no-repeat; background-size:contain;
+}
+html.light .confirm-logo{ background-color:rgba(0,0,0,.05); }
+.confirm-body{ flex:1 1 auto; min-width:0; }
+#confirm-text{ font-size:28px; line-height:1.4; }
+/* What the programme is, in the words the guide used. Four lines at most:
+   this is a dialog over a picture somebody is watching. */
+.confirm-desc{
+  margin-top:18px; font-size:21px; line-height:29px; color:var(--text-mid);
+  max-height:116px; overflow:hidden;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4;
+}
 .confirm-actions{ text-align:right; font-size:0; }
 .confirm-actions .btn{ margin:0 0 0 16px; }

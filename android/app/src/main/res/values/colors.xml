@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The artwork's own grey, near the middle of its vignette. A flat colour
+         rather than a picture: the launcher may shift the two layers against
+         each other, and a gradient that slides under a wordmark looks like a
+         printing fault. -->
+    <color name="ic_launcher_background">#1A1A1C</color>
+</resources>

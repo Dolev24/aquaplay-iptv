@@ -1,15 +1,19 @@
 /* net.js — HTTP with timeouts, real download progress, and a browser-dev proxy.
 
-   On Tizen the app can call provider hosts directly (config.xml declares
-   <access origin="*">, which lifts CORS for the widget). In a desktop browser
-   it cannot, so requests are routed through the bundled dev server's proxy. */
+   On a TV the app calls provider hosts directly. Tizen lifts CORS for the
+   widget through config.xml's <access origin="*">; the Android shell answers
+   the request natively in shouldInterceptRequest and hands back a response
+   that permits any origin. Either way there is nothing in the way.
+
+   A desktop browser has no such escape, so requests go through the bundled
+   dev server's proxy — a testing convenience that never ships. */
 (function (w) {
   'use strict';
 
   var N = {};
 
-  /* Set by app.js. In the browser we proxy; on the TV we go direct. */
-  N.useProxy = !U.isTizen;
+  /* Set by app.js. In the browser we proxy; on either TV we go direct. */
+  N.useProxy = !U.isTV;
   N.proxyPath = '/__proxy?url=';
 
   N.wrap = function (url) {
@@ -34,7 +38,7 @@
       var xhr = new XMLHttpRequest();
       var done = false;
       try { xhr.open('GET', target, true); }
-      catch (e) { reject(new Error('Bad URL')); return; }
+      catch (e) { reject(new Error(T('Bad URL'))); return; }
 
       xhr.timeout = timeout;
       if (opts.onProgress) {
@@ -49,11 +53,11 @@
       };
       xhr.onerror = function () {
         if (done) return; done = true;
-        reject(new Error('Network error — check the URL and your connection'));
+        reject(new Error(T('Network error — check the URL and your connection')));
       };
       xhr.ontimeout = function () {
         if (done) return; done = true;
-        reject(new Error('Timed out after ' + Math.round(timeout / 1000) + 's'));
+        reject(new Error(T('Timed out after {n}s', { n: Math.round(timeout / 1000) })));
       };
       try { xhr.send(); }
       catch (e) { if (!done) { done = true; reject(e); } }
@@ -65,7 +69,7 @@
       var s = t.replace(/^﻿/, '').trim();
       try { return JSON.parse(s); }
       catch (e) {
-        throw new Error('Server did not return valid JSON (got: ' + s.slice(0, 60) + ')');
+        throw new Error(T('Server did not return valid JSON') + ' (' + s.slice(0, 60) + ')');
       }
     });
   };
@@ -80,7 +84,7 @@
       var xhr = new XMLHttpRequest();
       var done = false;
       try { xhr.open('GET', target, true); }
-      catch (e) { reject(new Error('Bad URL')); return; }
+      catch (e) { reject(new Error(T('Bad URL'))); return; }
 
       xhr.responseType = 'arraybuffer';
       xhr.timeout = timeout;
@@ -96,11 +100,11 @@
       };
       xhr.onerror = function () {
         if (done) return; done = true;
-        reject(new Error('Network error — check the URL and your connection'));
+        reject(new Error(T('Network error — check the URL and your connection')));
       };
       xhr.ontimeout = function () {
         if (done) return; done = true;
-        reject(new Error('Timed out after ' + Math.round(timeout / 1000) + 's'));
+        reject(new Error(T('Timed out after {n}s', { n: Math.round(timeout / 1000) })));
       };
       try { xhr.send(); }
       catch (e) { if (!done) { done = true; reject(e); } }

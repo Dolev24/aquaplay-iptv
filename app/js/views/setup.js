@@ -91,7 +91,7 @@
     cancelable = !!opts.cancelable;
     tab = opts.tab || 'xtream';
     focusIdx = 0; editing = false; busy = false;
-    U.$('setup-title').textContent = cancelable ? 'Add a playlist' : 'Add your playlist';
+    U.$('setup-title').textContent = cancelable ? T('Add a playlist') : T('Add your playlist');
     msg('');
     buildRing(); paint();
     U.$('view-setup').classList.remove('hidden');
@@ -147,7 +147,7 @@
       case 'ok':    activate(); break;
       case 'back':
         if (cancelable) App.closeSetup();
-        else U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); });
+        else U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
         break;
       case 'exit':  Keys.exitApp(); break;
     }
@@ -183,19 +183,19 @@
     var p;
     if (tab === 'xtream') {
       var host = val('x-host'), user = val('x-user'), pass = val('x-pass');
-      if (!host) { msg('Server URL is required'); return; }
-      if (!user || !pass) { msg('Username and password are required'); return; }
+      if (!host) { msg(T('Server URL is required')); return; }
+      if (!user || !pass) { msg(T('Username and password are required')); return; }
       p = { type: 'xtream', name: val('x-name') || Xtream.normHost(host).replace(/^https?:\/\//, ''),
             host: Xtream.normHost(host), user: user, pass: pass };
     } else {
       var url = val('m-url');
-      if (!url) { msg('Playlist URL is required'); return; }
+      if (!url) { msg(T('Playlist URL is required')); return; }
       if (!/^https?:\/\//i.test(url)) { msg('URL must start with http:// or https://'); return; }
       p = { type: 'm3u', name: val('m-name') || 'My playlist', url: url, epgUrl: val('m-epg') };
     }
 
     busy = true;
-    U.loader(true, 'Connecting…');
+    U.loader(true, T('Connecting…'));
 
     var check = (p.type === 'xtream')
       ? Xtream.login(p).then(function (r) {
@@ -206,7 +206,7 @@
           return true;
         })
       : Net.text(p.url, { timeout: 25000 }).then(function (t) {
-          if (t.indexOf('#EXTINF') === -1) throw new Error('That URL is not an M3U playlist');
+          if (t.indexOf('#EXTINF') === -1) throw new Error(T('That URL is not an M3U playlist'));
           p._preload = t;
           return true;
         });
@@ -217,12 +217,12 @@
       var preload = p._preload;      // never persist the raw playlist text
       delete p._preload;
       var saved = Store.addProfile(p);
-      msg('Connected', true);
+      msg(T('Connected'), true);
       App.onProfileReady(saved, preload);
     }).catch(function (err) {
       busy = false;
       U.loader(false);
-      msg(err && err.message ? err.message : 'Could not connect');
+      msg(err && err.message ? err.message : T('Could not connect'));
     });
   }
 

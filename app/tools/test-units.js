@@ -40,6 +40,8 @@ ctx.self = ctx;
 ctx.document = {
   getElementById() { return null; },
   querySelector() { return null; },
+  querySelectorAll() { return []; },
+  documentElement: { setAttribute() {}, classList: { toggle() {}, add() {} } },
   addEventListener() {}
 };
 ctx.navigator = { userAgent: 'node' };
@@ -64,7 +66,7 @@ ctx.XMLHttpRequest = function () {
   };
 };
 
-for (const f of ['js/util.js', 'js/inflate.js', 'js/net.js', 'js/m3u.js', 'js/epg.js',
+for (const f of ['js/i18n.js', 'js/lang.js', 'js/util.js', 'js/inflate.js', 'js/net.js', 'js/m3u.js', 'js/epg.js',
                  'js/xtream.js', 'js/catchup.js', 'js/player.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
@@ -741,6 +743,647 @@ async function testReminders() {
   eq(S2.hasReminder('p', 'ch1', r.start), true, 'and a reminder outlives the app closing');
 }
 
+/* ============================================================ */
+/*  store: channel numbers, and what counts as a change         */
+/* ============================================================ */
+
+async function testNumbers() {
+  describe('store — a number put back to the one the playlist gave');
+
+  const mem = {};
+  const S = storeCtx(mem).Store;
+
+  eq(S.channelNumber('p', 'ch1'), null, 'a channel starts on whatever the playlist said');
+
+  S.setChannelNumber('p', 'ch1', 501, 12);
+  eq(S.channelNumber('p', 'ch1'), 501, 'moving it is remembered');
+
+  /* The reason this exists: typing the original number back is not a change,
+     and leaving a record of it left the row amber for ever and gave Reset
+     something to undo that would have undone nothing. */
+  S.setChannelNumber('p', 'ch1', 12, 12);
+  eq(S.channelNumber('p', 'ch1'), null,
+     'and typing the number the playlist gave back in is not a change at all');
+
+  /* Only when the caller knows what the playlist said. The numbers screen and
+     the channel panel both do; anything that does not still gets a plain set. */
+  S.setChannelNumber('p', 'ch2', 12);
+  eq(S.channelNumber('p', 'ch2'), 12, 'without the original to compare, 12 is just a number');
+
+  S.setChannelNumber('p', 'ch2', 0);
+  eq(S.channelNumber('p', 'ch2'), null, 'and zero still clears it');
+
+  /* Both places that paint a number amber ask what it is, not whether a
+     record of it exists — so playlists numbered this way before today come
+     out right too. */
+  const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+  ok(src('js/views/channels.js').indexOf('over !== c.num') > -1,
+     'the list only marks a number as changed when it differs from the playlist');
+  ok(src('js/views/numbers.js').indexOf('custom !== c.num') > -1,
+     'and so does the numbers screen');
+}
+
+/* ============================================================ */
+/*  store: what a new install opens on                          */
+/* ============================================================ */
+
+async function testDefaults() {
+  describe('store — the settings a new install starts with');
+
+  const S = storeCtx({}).Store;
+  const st = S.all().settings;
+
+  /* Both of these are answers to "where am I": a list in the order the
+     numbers on the remote expect, and a panel that opens on what is on now
+     with the evening under it rather than the afternoon above it. */
+  eq(st.sortBy, 'number', 'the list is in channel-number order');
+  eq(st.guideView, 'ahead', 'and the guide panel opens with what is on at the top');
+}
+
+/* ============================================================ */
+/*  the icons, and the four shapes Samsung asks for             */
+/* ============================================================ */
+
+/* Enough PNG to answer two questions: what shape is it, and is anything in it
+   see-through. The header is thirteen bytes at a fixed offset; the pixels need
+   the row filters undone, which is twenty lines and cheaper than a dependency. */
+function readPNG(file, wantPixels) {
+  const b = fs.readFileSync(file);
+  const out = {
+    w: b.readUInt32BE(16), h: b.readUInt32BE(20),
+    depth: b[24], colour: b[25], kb: Math.round(b.length / 1024)
+  };
+  if (!wantPixels) return out;
+
+  const parts = [];
+  for (let p = 8; p + 8 <= b.length;) {
+    const len = b.readUInt32BE(p), type = b.toString('ascii', p + 4, p + 8);
+    if (type === 'IDAT') parts.push(b.slice(p + 8, p + 8 + len));
+    p += len + 12;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(parts));
+  const bpp = out.colour === 6 ? 4 : 3, stride = out.w * bpp;
+  const px = Buffer.alloc(out.h * stride);
+  for (let y = 0; y < out.h; y++) {
+    const f = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const v = raw[y * (stride + 1) + 1 + x];
+      const a = x >= bpp ? px[y * stride + x - bpp] : 0;
+      const up = y > 0 ? px[(y - 1) * stride + x] : 0;
+      const c = (x >= bpp && y > 0) ? px[(y - 1) * stride + x - bpp] : 0;
+      let add = 0;
+      if (f === 1) add = a;
+      else if (f === 2) add = up;
+      else if (f === 3) add = (a + up) >> 1;
+      else if (f === 4) {
+        const p2 = a + up - c, pa = Math.abs(p2 - a), pb = Math.abs(p2 - up), pc = Math.abs(p2 - c);
+        add = (pa <= pb && pa <= pc) ? a : (pb <= pc ? up : c);
+      }
+      px[y * stride + x] = (v + add) & 0xFF;
+    }
+  }
+  out.at = function (x, y) {
+    const i = y * stride + x * bpp;
+    return [px[i], px[i + 1], px[i + 2], bpp === 4 ? px[i + 3] : 255];
+  };
+  return out;
+}
+
+async function testIcons() {
+  describe('the icon set — the four shapes Samsung asks for');
+
+  const REPO = path.resolve(ROOT, '..');
+  const set = {
+    icon: path.join(ROOT, 'icon.png'),
+    testing: path.join(REPO, 'branding/testing-icon-117x117.png'),
+    back: path.join(REPO, 'branding/banner-background-1920x1080.png'),
+    logo: path.join(REPO, 'branding/banner-logo-1920x1080.png')
+  };
+  for (const k of Object.keys(set)) {
+    if (!fs.existsSync(set[k])) { ok(false, 'the ' + k + ' icon exists', set[k]); return; }
+  }
+
+  /* A TV tile is wider than it is tall. A square icon is not "close enough":
+     the launcher letterboxes it, which is what this build shipped until the
+     shapes were checked against the guidelines. */
+  const icon = readPNG(set.icon);
+  eq([icon.w, icon.h], [512, 423], 'the application icon is 512 x 423, the shape of a TV tile');
+  eq(icon.depth, 8, 'eight bits a sample');
+  eq(icon.colour, 2, 'and no alpha channel: the guideline asks for 24-bit');
+  ok(icon.kb < 300, 'under the 300 KB limit', icon.kb + ' KB');
+
+  const small = readPNG(set.testing);
+  eq([small.w, small.h], [117, 117], 'the side-load testing icon is 117 square');
+  eq(small.colour, 2, 'also 24-bit');
+
+  const back = readPNG(set.back);
+  eq([back.w, back.h], [1920, 1080], 'the large logo background is 1920 x 1080');
+  eq(back.colour, 2, 'opaque, because it is the thing underneath');
+  ok(back.kb < 300, 'and well under the limit', back.kb + ' KB');
+
+  /* The other half of the large logo. It goes over the background, so if it
+     were a picture of the wordmark on its own grey it would sit there as a
+     rectangle with a visible edge — the whole point is that it is a cut-out. */
+  const logo = readPNG(set.logo, true);
+  eq([logo.w, logo.h], [1920, 1080], 'the wordmark half is the same 1920 x 1080');
+  eq(logo.colour, 6, 'with an alpha channel');
+  ok(logo.kb < 300, 'and under the limit too', logo.kb + ' KB');
+  eq(logo.at(4, 4)[3], 0, 'its corner is transparent, not grey');
+  eq(logo.at(960, 4)[3], 0, 'and so is the space above the wordmark');
+
+  /* Between the two ways this can go wrong: nothing came through the key, or
+     the key did nothing and the whole frame is a grey rectangle. A wordmark
+     on transparency is a few per cent of a 1920 x 1080 sheet, and the letters
+     that are in it are solid rather than a ghost of themselves. */
+  let ink = 0, solid = 0, bx0 = logo.w, bx1 = -1, by0 = logo.h, by1 = -1;
+  for (let y = 0; y < logo.h; y += 2) {
+    for (let x = 0; x < logo.w; x += 2) {
+      const a = logo.at(x, y)[3];
+      if (a > 8) {
+        ink++;
+        if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+        if (y < by0) by0 = y; if (y > by1) by1 = y;
+      }
+      if (a > 200) solid++;
+    }
+  }
+  const covered = ink / ((logo.w / 2) * (logo.h / 2));
+  ok(covered > 0.01 && covered < 0.25, 'what came through is a wordmark, not a rectangle',
+     Math.round(covered * 1000) / 10 + '% of the frame');
+  ok(solid > ink * 0.5, 'and it is solid rather than a ghost',
+     solid + ' of ' + ink + ' opaque');
+
+  /* Not up against the edge of the frame: Seller Office puts this on a tile
+     with rounded corners and padding of its own. */
+  ok(bx0 > logo.w * 0.15 && bx1 < logo.w * 0.85, 'with a margin left and right',
+     bx0 + '..' + bx1 + ' of ' + logo.w);
+  ok(by0 > logo.h * 0.15 && by1 < logo.h * 0.85, 'and above and below',
+     by0 + '..' + by1 + ' of ' + logo.h);
+
+  /* How much of the tile the wordmark actually covers.
+
+     This is the one somebody complained about: it read as small in the TV's
+     menu, and the measurement said why — the mark was 86% of the width and
+     34% of the height, because the tile was a *crop* of the artwork and a
+     crop cannot make the mark any bigger than it already was in the square
+     it came from. Composed instead, the share is a number somebody chose.
+
+     The height is not asserted. The wordmark is 3.1:1 and the tile is
+     1.21:1, so a mark that fills the width is 37% of the height and no
+     amount of wanting will move it — the empty band above and below is the
+     shape of the artwork, not a mistake in the build. */
+  const tile = readPNG(set.icon, true);
+  let tx0 = tile.w, tx1 = -1;
+  for (let x = 0; x < tile.w; x++) {
+    for (let y = 0; y < tile.h; y += 2) {
+      const p = tile.at(x, y);
+      if (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2] > 90) {
+        if (x < tx0) tx0 = x;
+        if (x > tx1) tx1 = x;
+        break;
+      }
+    }
+  }
+  const across = (tx1 - tx0 + 1) / tile.w;
+  ok(across > 0.88, 'the wordmark fills the width of the application icon',
+     Math.round(across * 100) + '% of 512px');
+  ok(across < 0.99, 'without running into the edge of it',
+     Math.round(across * 100) + '%');
+
+  /* An adaptive icon, or API 26 and up shrink the legacy PNG into a mask of
+     their own making and the icon arrives at the launcher smaller again —
+     which is the other half of the same complaint. */
+  const adaptive = path.join(REPO, 'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml');
+  ok(fs.existsSync(adaptive), 'Android gets a real adaptive icon');
+  if (fs.existsSync(adaptive)) {
+    const xml = fs.readFileSync(adaptive, 'utf8');
+    ok(xml.indexOf('<adaptive-icon') > -1, 'declared as one');
+    ok(xml.indexOf('@mipmap/ic_foreground') > -1, 'with the wordmark as its foreground');
+    ok(xml.indexOf('@color/ic_launcher_background') > -1,
+       'and a flat colour behind it, not a second picture');
+  }
+
+  /* The foreground is drawn on 108dp of canvas of which only the middle 72
+     survives the mask, so it has to be bigger than the legacy icon and it has
+     to be see-through. */
+  const fg = path.join(REPO, 'android/app/src/main/res/mipmap-xxhdpi/ic_foreground.png');
+  if (fs.existsSync(fg)) {
+    const f = readPNG(fg, true);
+    eq([f.w, f.h], [324, 324], 'the foreground is 2.25x the legacy icon');
+    eq(f.colour, 6, 'and has an alpha channel');
+    eq(f.at(4, 4)[3], 0, 'its corner is transparent, so the colour shows through');
+    /* Inside the safe zone: anything outside the middle 72 of 108 may be
+       cropped by whatever shape the launcher feels like using. */
+    let fx0 = f.w;
+    for (let x = 0; x < f.w; x++) {
+      let hit = false;
+      for (let y = 0; y < f.h; y += 2) if (f.at(x, y)[3] > 40) { hit = true; break; }
+      if (hit) { fx0 = x; break; }
+    }
+    ok(fx0 > f.w * 0.16, 'and the mark sits inside the mask-safe middle',
+       fx0 + 'px in of ' + f.w);
+  }
+
+  /* The package points at the one that goes in it, and only that one. */
+  const cfg = fs.readFileSync(path.join(ROOT, 'config.xml'), 'utf8');
+  ok(cfg.indexOf('<icon src="icon.png"/>') > -1, 'config.xml names the application icon');
+  const pack = fs.readFileSync(path.join(ROOT, 'tools/pack.js'), 'utf8');
+  ok(pack.indexOf("'icon.png'") > -1, 'and the packer stages it');
+  ok(pack.indexOf('branding') === -1,
+     'the store artwork is not in the .wgt: it is for the submission form, not the TV');
+}
+
+/* ============================================================ */
+/*  Android TV: the shell's half of the bargain                 */
+/* ============================================================ */
+
+/* A context with the shell's bridge already in it, the way the real one is:
+   MainActivity calls addJavascriptInterface before the first script runs, so
+   util.js has an answer by the time anything asks. Everything the page can
+   say to the shell is recorded here, which is the only way to test a native
+   player without a television. */
+function androidCtx(opts) {
+  opts = opts || {};
+  const calls = [];
+  const c = vm.createContext({ console, setTimeout, clearTimeout, setInterval, clearInterval });
+  c.window = c; c.self = c;
+  c.document = {
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    documentElement: { setAttribute() {}, classList: { toggle() {}, add() {} }, lang: '' },
+    addEventListener() {}
+  };
+  c.navigator = { userAgent: 'node' };
+  c.XMLHttpRequest = function () { this.open = function () {}; this.send = function () {}; };
+  c.Store = { settings: function () { return { bufferSize: opts.buffer || 'auto' }; } };
+
+  const state = {
+    size: opts.videoSize || '',
+    duration: opts.duration === undefined ? 0 : opts.duration,
+    position: opts.position || 0,
+    playing: !!opts.playing
+  };
+
+  c.AquaPlayNative = {
+    shellVersion: function () { calls.push(['shellVersion']); return '1'; },
+    play: function (url, mode) { calls.push(['play', url, mode]); },
+    stop: function () { calls.push(['stop']); },
+    seekTo: function (ms) { calls.push(['seekTo', ms]); },
+    setRect: function (x, y, w, h) { calls.push(['setRect', x, y, w, h]); },
+    setBuffer: function (p, r) { calls.push(['setBuffer', p, r]); },
+    isPlaying: function () { return state.playing; },
+    positionMs: function () { return state.position; },
+    durationMs: function () { return state.duration; },
+    videoSize: function () { return state.size; },
+    state: function () { return 'playing'; },
+    lastError: function () { return ''; },
+    exitApp: function () { calls.push(['exitApp']); }
+  };
+
+  /* The page draws in a fixed 1920x1080; a real TV window is the same size,
+     which is the case where the scale is 1 and the rect arithmetic is
+     readable. The scaled case has a test of its own below. */
+  c.innerWidth = opts.innerWidth || 1920;
+  c.innerHeight = opts.innerHeight || 1080;
+  c.devicePixelRatio = opts.dpr || 1;
+
+  for (const f of ['js/i18n.js', 'js/lang.js', 'js/util.js', 'js/inflate.js', 'js/net.js',
+                   'js/catchup.js', 'js/keys.js', 'js/player.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
+  }
+  c.U.DEBUG = false;
+  c.calls = calls;
+  c.fake = state;
+  c.took = function (name) { return calls.filter(function (k) { return k[0] === name; }); };
+  c.last = function (name) { const m = c.took(name); return m[m.length - 1]; };
+  return c;
+}
+
+async function testAndroidPlatform() {
+  describe('Android TV — which platform the app thinks it is on');
+
+  const a = androidCtx();
+  eq(a.U.isAndroid, true, 'the bridge is what identifies the platform');
+  eq(a.U.isTizen, false, 'and it is not mistaken for the other TV');
+  eq(a.U.isTV, true, 'both of them are a TV');
+  eq(a.U.platform, 'android', 'which is also available by name');
+
+  /* The proxy is a desktop crutch. On Tizen config.xml lifts CORS; on Android
+     the shell answers the request itself. Sending either one through a proxy
+     that is not running would be a playlist that never loads. */
+  eq(a.Net.useProxy, false, 'so nothing is proxied');
+  eq(a.Net.wrap('http://p.tv/get.php'), 'http://p.tv/get.php', 'a request goes out as itself');
+  eq(a.Net.media('http://p.tv/s.ts'), 'http://p.tv/s.ts', 'and so does a stream');
+
+  /* The browser is still the browser. */
+  eq(U.isAndroid, false, 'a desktop browser is not Android');
+  eq(U.isTV, false, 'nor a TV');
+  eq(U.platform, 'browser', 'and says so');
+  eq(Net.useProxy, true, 'which is why it still needs the proxy');
+}
+
+async function testAndroidPlayer() {
+  describe('Android TV — the player behind the page');
+
+  const a = androidCtx({ videoSize: '1920x1080' });
+  const P = a.Player;
+  eq(P.isAndroid, true, 'player.js takes the same view');
+  eq(P.isNative, true, 'and knows there is a decoder of its own behind the page');
+
+  P.init();
+  P.play('http://p.tv/live/1.ts', 'full');
+
+  /* Order matters. A rectangle set after the stream has started is a picture
+     that appears in the wrong place first, which is what the Tizen path spent
+     two rounds learning. */
+  const order = a.calls.map(function (k) { return k[0]; });
+  ok(order.indexOf('setRect') < order.indexOf('play'),
+     'the picture is placed before the stream is opened', JSON.stringify(order));
+  eq(a.last('play'), ['play', 'http://p.tv/live/1.ts', 'full'], 'and then it is opened');
+
+  /* The buffer numbers are the same trade as Tizen's: the first is what a
+     channel costs to open, the second what it costs to recover from a stall,
+     and only the second is generous. */
+  eq(a.last('setBuffer'), ['setBuffer', 2000, 4000], 'with the default buffering');
+  const small = androidCtx({ buffer: 'small', videoSize: '1920x1080' });
+  small.Player.init();
+  small.Player.play('http://p.tv/2.ts', 'full');
+  eq(small.last('setBuffer'), ['setBuffer', 1000, 3000], 'a small buffer opens quicker');
+  const large = androidCtx({ buffer: 'large', videoSize: '1920x1080' });
+  large.Player.init();
+  large.Player.play('http://p.tv/3.ts', 'full');
+  eq(large.last('setBuffer'), ['setBuffer', 5000, 8000], 'and a large one holds more back');
+
+  P.stop();
+  eq(a.last('stop'), ['stop'], 'stopping stops it');
+}
+
+async function testAndroidRect() {
+  describe('Android TV — the app shapes the picture, the shell only places it');
+
+  /* The whole arrangement rests on this. ExoPlayer is told to fill a
+     rectangle exactly, so the rectangle has to arrive with the letterboxing
+     already in it — a 4:3 channel on a 16:9 screen is bars either side
+     because the app put them there, not because the platform was asked to. */
+  const a = androidCtx({ videoSize: '1440x1080' });     // 4:3
+  a.Player.init();
+  a.Player.play('http://p.tv/4x3.ts', 'full');
+  eq(a.last('setRect'), ['setRect', 240, 0, 1440, 1080],
+     'a 4:3 stream fullscreen is pillarboxed by the app');
+
+  const wide = androidCtx({ videoSize: '1920x1080' });
+  wide.Player.init();
+  wide.Player.play('http://p.tv/16x9.ts', 'full');
+  eq(wide.last('setRect'), ['setRect', 0, 0, 1920, 1080],
+     'a 16:9 one fills the screen');
+
+  /* The preview box is the one in the CSS, and the same arithmetic applies. */
+  const prev = androidCtx({ videoSize: '1920x1080' });
+  prev.Player.init();
+  prev.Player.play('http://p.tv/16x9.ts', 'preview');
+  eq(prev.last('setRect'), ['setRect', 880, 0, 1040, 585],
+     'and the preview lands on the frame the CSS drew');
+
+  /* A window that is not 1920x1080 — the surface is placed in the window's
+     own pixels while the app draws in a fixed 1920x1080 that is scaled to
+     fit, and they only agree when the scale is 1. */
+  const half = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540 });
+  half.Player.init();
+  half.Player.play('http://p.tv/16x9.ts', 'full');
+  eq(half.last('setRect'), ['setRect', 0, 0, 960, 540],
+     'a half-size window gets a half-size rectangle');
+
+  /* And the one that was actually wrong on a television.
+
+     The page measures the window in CSS pixels, and on Android a CSS pixel is
+     a dp — so a 1080p set at xhdpi hands the page a 960x540 viewport. The
+     surface is laid out in device pixels. Sending it the CSS numbers put the
+     picture in the top-left quarter of the screen at half the size, which is
+     what somebody reported as the resolution being off, and is close enough
+     to "not playing" if you are looking at the middle of the screen. */
+  const tv = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540, dpr: 2 });
+  tv.Player.init();
+  tv.Player.play('http://p.tv/16x9.ts', 'full');
+  eq(tv.last('setRect'), ['setRect', 0, 0, 1920, 1080],
+     'a 1080p set at xhdpi fills the screen, in device pixels');
+
+  /* The same conversion on a 4K set, where the density and the page scale
+     both differ and only the ratio between them is the right number. */
+  const uhd = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540, dpr: 4 });
+  uhd.Player.init();
+  uhd.Player.play('http://p.tv/16x9.ts', 'full');
+  eq(uhd.last('setRect'), ['setRect', 0, 0, 3840, 2160],
+     'and a 4K one does too');
+
+  /* The shape still comes from the app, whatever the pixels are called. */
+  const pillar = androidCtx({ videoSize: '1440x1080', innerWidth: 960, innerHeight: 540, dpr: 2 });
+  pillar.Player.init();
+  pillar.Player.play('http://p.tv/4x3.ts', 'full');
+  eq(pillar.last('setRect'), ['setRect', 240, 0, 1440, 1080],
+     'a 4:3 stream is still pillarboxed by the app, in device pixels');
+}
+
+async function testAndroidState() {
+  describe('Android TV — what the page can ask the shell');
+
+  /* Live has no duration, and player.js turns "has a duration" into "can be
+     sought". ExoPlayer says TIME_UNSET for a live stream, which is a large
+     negative number and would otherwise sail through as truthy. */
+  const live = androidCtx({ duration: -9223372036854775807 });
+  live.Player.init();
+  eq(live.Player.duration(), 0, 'a live stream has no duration');
+  eq(live.Player.seekable(), false, 'so it cannot be sought');
+
+  const film = androidCtx({ duration: 5400000, position: 60000 });
+  film.Player.init();
+  eq(film.Player.duration(), 5400000, 'a recording has one');
+  eq(film.Player.seekable(), true, 'and can be moved through');
+  eq(film.Player.position(), 60000, 'position comes back in milliseconds');
+  eq(film.Player.elapsed(), 60, 'and elapsed in seconds, which is what the drift watch reads');
+
+  /* Seeking past the end is how a player ends up sitting on a black frame it
+     will not leave. Two seconds short of it, the same as everywhere else. */
+  eq(film.Player.seekTo(5400000), 5398000, 'a seek to the very end stops short of it');
+  eq(film.last('seekTo'), ['seekTo', 5398000], 'and the shell is told where it actually went');
+  eq(film.Player.seekTo(-5000), 0, 'and a seek before the start is the start');
+
+  const playing = androidCtx({ playing: true });
+  playing.Player.init();
+  eq(playing.Player.isPlaying(), true, 'whether it is playing is the shell to answer');
+  eq(androidCtx().Player.isPlaying(), false, 'and it says so when it is not');
+}
+
+async function testAndroidEvents() {
+  describe('Android TV — the shell reporting back');
+
+  /* The shell names its events the way AVPlay names them, so both TV paths
+     report the same things and nothing upstairs can tell them apart. This is
+     the door they come through. */
+  const a = androidCtx({ videoSize: '1920x1080' });
+  const seen = [];
+  a.Player.init();
+  a.Player.on({
+    onPlaying: function () { seen.push(['playing']); },
+    onBuffering: function (on, pct) { seen.push(['buffering', on, pct]); },
+    onError: function (m) { seen.push(['error', m]); },
+    onTime: function (t) { seen.push(['time', t]); }
+  });
+
+  ok(typeof a.AquaPlayShell.player === 'function',
+     'init leaves the shell somewhere to deliver events');
+
+  a.AquaPlayShell.player('buffering', '40');
+  eq(seen.pop(), ['buffering', true, 40], 'buffering, with how far along it is');
+
+  a.AquaPlayShell.player('buffered', '');
+  eq(seen.pop(), ['buffering', false, undefined], 'and buffered again');
+
+  a.AquaPlayShell.player('playing', '');
+  eq(seen.pop(), ['playing'], 'playing');
+
+  a.AquaPlayShell.player('time', '61000');
+  eq(seen.pop(), ['time', 61000], 'the clock, as a number rather than the string it arrived as');
+
+  a.AquaPlayShell.player('error', 'Cannot reach the stream server');
+  eq(seen.pop(), ['error', 'Cannot reach the stream server'], 'and what went wrong, in words');
+  eq(a.Player.lastError, 'Cannot reach the stream server', 'kept for the diagnostics screen');
+
+  /* Called from Java through evaluateJavascript, where a throw goes nowhere.
+     An event nobody handles must not become a silent broken bridge. */
+  a.Player.on(null);
+  a.AquaPlayShell.player('error', 'no handler for this');
+  a.AquaPlayShell.player('nonsense', '');
+  ok(true, 'an unhandled event does not throw back into Java');
+}
+
+async function testAndroidKeys() {
+  describe('Android TV — the keys the page never sees');
+
+  /* Android takes BACK, the media transport and the coloured buttons before
+     the WebView gets them, so the shell translates those and injects them at
+     the same door every other key comes through. */
+  const a = androidCtx();
+  const seen = [];
+  a.Keys.setHandler(function (e) { seen.push([e.action, e.digit]); });
+  a.Keys.init();
+
+  ok(typeof a.AquaPlayShell.key === 'function', 'init leaves the shell a way in');
+
+  a.AquaPlayShell.key('back', 0);
+  eq(seen.pop(), ['back', 0], 'back arrives as an action, not as a keycode');
+  a.AquaPlayShell.key('red', 0);
+  eq(seen.pop(), ['red', 0], 'and so does a coloured button');
+  a.AquaPlayShell.key('digit', 7);
+  eq(seen.pop(), ['digit', 7], 'a digit brings its digit');
+
+  /* The shell is the one caller that can hand over something nobody has heard
+     of — a keycode table drifting away from the vocabulary. Dropped rather
+     than passed to a handler that would not know what to do with it. */
+  a.AquaPlayShell.key('teletext', 0);
+  eq(seen.length, 0, 'an action nobody knows is dropped, not forwarded');
+
+  /* Every action the Kotlin table produces has to be one keys.js accepts,
+     which is the drift this is really guarding against. */
+  const kotlin = fs.readFileSync(
+    path.join(ROOT, '..', 'android/app/src/main/java/com/aquaplay/tv/MainActivity.kt'), 'utf8');
+  const table = kotlin.slice(kotlin.indexOf('val ACTIONS'), kotlin.indexOf('fun quote'));
+  const produced = (table.match(/to "([a-zA-Z]+)"/g) || [])
+    .map(function (m) { return m.slice(4, -1); });
+  ok(produced.length > 10, 'the shell maps a remote-sized set of keys', produced.length + ' keys');
+  const unknown = produced.filter(function (x) { return a.Keys.ACTIONS.indexOf(x) === -1; });
+  eq(unknown, [], 'and every one of them is an action keys.js accepts');
+
+  /* The other half: the shell must not claim keys the page handles itself.
+     A D-pad routed through Kotlin is a text field that cannot be typed in. */
+  ['DPAD_UP', 'DPAD_DOWN', 'DPAD_LEFT', 'DPAD_RIGHT', 'DPAD_CENTER', 'ENTER'].forEach(function (k) {
+    ok(table.indexOf('KEYCODE_' + k) === -1,
+       k + ' is left to the WebView, which knows what has focus');
+  });
+}
+
+async function testAndroidProject() {
+  describe('Android TV — the shell ships the same app');
+
+  const root = path.join(ROOT, '..');
+  const gradle = fs.readFileSync(path.join(root, 'android/app/build.gradle.kts'), 'utf8');
+  const pack = fs.readFileSync(path.join(ROOT, 'tools/pack.js'), 'utf8');
+
+  /* Two packagers, one app. The .wgt stages a list of names and the APK
+     copies a list of patterns, and if those two ever disagree the platforms
+     are shipping different software — which is the kind of difference that
+     turns up as one bug report nobody else can reproduce. */
+  const staged = (pack.match(/const STAGE = \[([^\]]*)\]/) || [])[1] || '';
+  const wgt = (staged.match(/'([^']+)'/g) || []).map(function (s) { return s.slice(1, -1); });
+  eq(wgt.filter(function (f) { return f !== 'config.xml' && f !== 'icon.png'; }).sort(),
+     ['css', 'img', 'index.html', 'js'],
+     'the .wgt carries the app plus two files only Tizen wants');
+  ['index.html', 'css/**', 'img/**', 'js/**'].forEach(function (inc) {
+    ok(gradle.indexOf('include("' + inc + '")') > -1,
+       'and the APK stages ' + inc, gradle.slice(gradle.indexOf('val stageWebApp'), 400));
+  });
+  ok(gradle.indexOf('config.xml"') === -1 || gradle.indexOf('include("config.xml")') === -1,
+     'without Tizen\'s manifest, which would mean nothing there');
+
+  /* One version number. The Gradle file reads it out of config.xml, so a
+     reformat of that file would break the build rather than quietly ship an
+     APK numbered zero. */
+  const cfg = fs.readFileSync(path.join(ROOT, 'config.xml'), 'utf8');
+  /* The whole pattern, not as much of it as fits before the first `"""`:
+     a lazy match here once passed a regex that Kotlin could not compile,
+     because it stopped at the very quote that was the problem. */
+  const re = (gradle.match(/Regex\("""(.*)"""\)/) || [])[1];
+  ok(re, 'the build reads the version with a regular expression', String(re));
+  ok(!/"$/.test(re), 'whose pattern does not end on a quote — a Kotlin raw',
+     'string cannot, and one that did would end a character early');
+  const found = new RegExp(re).exec(cfg);
+  ok(found && found[1], 'which still finds it in config.xml', String(found && found[1]));
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  eq(found[1], pkg.version, 'and it is the version the rest of the project is on');
+
+  /* What makes it a television app rather than a phone app that runs on one. */
+  const manifest = fs.readFileSync(
+    path.join(root, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  ok(manifest.indexOf('android.software.leanback') > -1,
+     'the manifest declares itself a TV app');
+  ok(/android\.hardware\.touchscreen[\s\S]{0,80}required="false"/.test(manifest),
+     'and that it does not need a touchscreen');
+  ok(manifest.indexOf('android.intent.category.LEANBACK_LAUNCHER') > -1,
+     'with a launcher entry the TV home screen will show');
+  ok(manifest.indexOf('android:banner="@drawable/banner"') > -1,
+     'and a banner, without which it does not appear there at all');
+  ok(manifest.indexOf('android.permission.INTERNET') > -1, 'it may use the network');
+  ok(manifest.indexOf('networkSecurityConfig') > -1,
+     'and reach a provider over plain http, which is what most of them are');
+
+  /* Two that were wrong when this was written, and neither of which shows up
+     anywhere a test can normally see: one is a compiler error and the other
+     is an exception thrown a second after the app launches. */
+  const activity = fs.readFileSync(
+    path.join(root, 'android/app/src/main/java/com/aquaplay/tv/MainActivity.kt'), 'utf8');
+  const themes = fs.readFileSync(
+    path.join(root, 'android/app/src/main/res/values/themes.xml'), 'utf8');
+  const appcompatTheme = /parent="Theme\.AppCompat/.test(themes);
+  const base = (activity.match(/class MainActivity\s*:\s*(\w+)/) || [])[1];
+  ok(base, 'the activity declares what it extends', String(base));
+  ok(base !== 'AppCompatActivity' || appcompatTheme,
+     'and it and its theme are the same family — AppCompatActivity throws at',
+     'startup on any theme that is not a Theme.AppCompat, and this one is Material');
+
+  /* Most of ExoPlayer is marked @UnstableApi, and Android Lint fails a
+     release build over using it unless the class that does says so. Kotlin's
+     -opt-in flag looked like the answer and was not: in Media3 1.3 that
+     annotation is not an opt-in marker, and the flag compiled to a warning
+     about itself. The annotation is the thing that works. */
+  const bridge = fs.readFileSync(
+    path.join(root, 'android/app/src/main/java/com/aquaplay/tv/PlayerBridge.kt'), 'utf8');
+  ok(/@UnstableApi\s*\nclass PlayerBridge/.test(bridge),
+     'the class that touches ExoPlayer is marked for it',
+     'Android Lint fails a release build otherwise');
+  ok(gradle.indexOf('opt-in=androidx.media3') === -1,
+     'and the Kotlin opt-in flag is gone, since it did nothing but warn');
+}
+
 async function testCap() {
   describe('epg.parse — the per-channel cap keeps the present, not the past');
 
@@ -915,6 +1558,122 @@ async function testKeepOrder() {
   eq((d2.byChannel.x9 || []).length, 1, 'channels first still works');
   eq(d2.byChannel.junk, undefined, 'and a channel the playlist does not have is still skipped');
   ok(d2.skipped > 0, 'and counted as skipped', String(d2.skipped));
+}
+
+/* ============================================================ */
+/*  i18n                                                        */
+/* ============================================================ */
+
+/* Every string the app asks for by name, read out of the shipped source the
+   same way a person would grep for it: T('...') in the JS, data-i18n in the
+   markup, plus what the settings screen hands to row() and cycle() — those are
+   translated inside the helpers, so the literal never appears next to a T.
+   I18N.EXTRA covers what is left: day names, group names, the keyboard help. */
+function usedKeys() {
+  const files = [];
+  (function walk(d) {
+    fs.readdirSync(path.join(ROOT, d)).forEach(function (n) {
+      const rel = d ? d + '/' + n : n;
+      if (fs.statSync(path.join(ROOT, rel)).isDirectory()) {
+        if (n !== 'node_modules' && n !== 'lib' && n !== 'tools' && n[0] !== '.') walk(rel);
+        return;
+      }
+      if (/\.(js|html)$/.test(n) && rel !== 'js/lang.js') files.push(rel);
+    });
+  })('');
+
+  const keys = {};
+  const add = function (k) { if (k && k.trim()) keys[k] = 1; };
+  const RE_T = new RegExp("\\bT\\('((?:[^'\\\\]|\\\\.)*)'", 'g');
+  const RE_ATTR = /data-i18n(?:-ph)?="([^"]*)"/g;
+  files.forEach(function (rel) {
+    const s = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    [RE_T, RE_ATTR].forEach(function (re) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(s))) add(m[1]);
+    });
+  });
+
+  const set = fs.readFileSync(path.join(ROOT, 'js/views/settings.js'), 'utf8');
+  const RE_ROW = new RegExp("\\brow\\('((?:[^'\\\\]|\\\\.)*)', '((?:[^'\\\\]|\\\\.)*)'", 'g');
+  let m;
+  while ((m = RE_ROW.exec(set))) { add(m[1]); add(m[2]); }
+  const RE_CYCLE = /cycle\(([\s\S]*?)\)\)/g;
+  while ((m = RE_CYCLE.exec(set))) {
+    const arrays = m[1].match(/\[[^\]]*\]/g) || [];
+    const last = arrays[arrays.length - 1];
+    if (!last) continue;
+    (last.match(new RegExp("'((?:[^'\\\\]|\\\\.)*)'", 'g')) || [])
+      .forEach(function (l) { add(l.slice(1, -1)); });
+  }
+
+  (ctx.I18N.EXTRA || []).forEach(add);
+  return Object.keys(keys).sort();
+}
+
+async function testI18n() {
+  describe('i18n — ten languages, one key set');
+
+  const I = ctx.I18N, LANGS = ctx.LANGS;
+  const keys = usedKeys();
+
+  ok(keys.length > 300, 'the app asks for a few hundred strings by name',
+     keys.length + ' keys');
+  eq(I.LANGS.length, 10, 'ten languages are offered');
+  eq(I.LANGS[0].code, 'en', 'English first, since it is the key language');
+  ok(I.LANGS.every(function (l) { return l.name && l.code; }),
+     'each has a code and a name');
+  /* A language list is the one screen someone cannot be expected to read in
+     the language they are trying to leave. */
+  ok(I.LANGS.every(function (l) { return l.code === 'en' || l.name !== l.code; }),
+     'named in their own language, not by their code',
+     I.LANGS.map(function (l) { return l.name; }).join(' '));
+
+  /* The check this file exists for: a string added to the app tomorrow will
+     fail here until every language has it, rather than quietly appearing in
+     English inside a Korean interface. */
+  const gaps = [];
+  const holes = [];
+  I.LANGS.forEach(function (l) {
+    if (l.code === 'en') return;
+    const d = LANGS[l.code];
+    if (!d) { gaps.push(l.code + ': no dictionary at all'); return; }
+    const missing = keys.filter(function (k) { return !(k in d); });
+    if (missing.length) {
+      gaps.push(l.code + ': ' + missing.length + ' missing, e.g. "' + missing[0] + '"');
+    }
+    const empty = Object.keys(d).filter(function (k) { return !String(d[k]).trim(); });
+    if (empty.length) gaps.push(l.code + ': ' + empty.length + ' empty');
+
+    /* A placeholder may move within a sentence — that is the whole point of
+       using one — but it may not be dropped, or the sentence loses a fact. */
+    Object.keys(d).forEach(function (k) {
+      const want = (k.match(/\{\w+\}/g) || []).sort().join(',');
+      const got = (String(d[k]).match(/\{\w+\}/g) || []).sort().join(',');
+      if (want !== got) holes.push(l.code + ': ' + k + ' -> ' + d[k]);
+    });
+  });
+  eq(gaps, [], 'every language covers every key');
+  eq(holes, [], 'and keeps every placeholder');
+
+  /* Translation itself. */
+  const before = I.lang();
+  eq(I.set('es'), 'es', 'the language can be set');
+  eq(I.t('Settings'), 'Ajustes', 'and strings come back translated');
+  eq(I.t('Set to {n}', { n: 7 }), 'Puesto en 7', 'with parameters filled in');
+  eq(I.t('Nothing here has been translated'), 'Nothing here has been translated',
+     'an unknown string falls back to the English rather than to a blank');
+  eq(I.set('ja'), 'ja', 'switching again');
+  eq(I.t('Settings'), '設定', 'gives the other language');
+  eq(I.set('xx'), 'en', 'an unknown code falls back to English');
+  eq(I.t('Settings'), 'Settings', 'which is the key itself');
+  /* A parameter nobody supplied stays visible instead of printing "undefined":
+     a half-built sentence is easier to spot in a screenshot than a plausible
+     wrong one. */
+  eq(I.t('Set to {n}'), 'Set to {n}', 'a missing parameter is left alone');
+
+  I.set(before);
 }
 (async function () {
 /* ---------- gzip ----------
@@ -1318,6 +2077,7 @@ async function testGuideStream() {
   console.log('\nAquaPlay IPTV — parser tests');
   const t0 = Date.now();
   try {
+    await testI18n();
     await testUtil();
     await testM3U();
     await testEPG();
@@ -1333,6 +2093,16 @@ async function testGuideStream() {
     await testPictureFit();
     await testLocks();
     await testReminders();
+    await testNumbers();
+    await testDefaults();
+    await testIcons();
+    await testAndroidPlatform();
+    await testAndroidPlayer();
+    await testAndroidRect();
+    await testAndroidState();
+    await testAndroidEvents();
+    await testAndroidKeys();
+    await testAndroidProject();
     await testCap();
     await testCoverage();
     await testKeepOrder();

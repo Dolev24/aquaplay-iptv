@@ -1,7 +1,8 @@
 # AquaPlay IPTV
 
 Lightweight IPTV player for Samsung Tizen TVs. Vanilla JS, no framework, no
-build step. Android TV is a later target (WebView/Capacitor shell).
+build step. Android TV is a second target, and `android/` is the shell that
+carries the same app there.
 
 Full architecture, TV install steps and roadmap: `app/README.md`.
 This file holds only what that README does not.
@@ -107,14 +108,14 @@ this project started in, which had no shell at all.
 cd app && npm test
 ```
 
-693 tests across four suites, first written here on 2026-08-26 (the suites the
+734 tests across four suites, first written here on 2026-08-26 (the suites the
 original README referenced were never in the zip):
 
-- `tools/test-units.js` (271) — loads the real modules into a fake `window` via
+- `tools/test-units.js` (287) — loads the real modules into a fake `window` via
   `vm`. No browser, no dependencies, ~450 ms.
 - `tools/test-proxy.js` (20) — the dev proxy against a mock upstream. No
   browser either.
-- `tools/e2e.js` (345) — 5,000-channel playlist + XMLTV, real key events.
+- `tools/e2e.js` (370) — 5,000-channel playlist + XMLTV, real key events.
   Covers the play-on-demand model, the guide viewer, channel renumbering and
   catch-up replay.
 - `tools/e2e-vod.js` (57) — Movies and Series against a mock Xtream panel the
@@ -167,6 +168,14 @@ delete the cached blob and rebuild the guide.
 
 `shortUrl` masks the tail of a playlist URL. The path token is the credential —
 it should not be readable from a photograph of the TV.
+
+Two of these ship on a different setting than they were written with. `sortBy`
+starts on **number** rather than provider order, and `guideView` on **now at
+the top** — both because the remote has a number pad and the number is how a
+viewer says which channel they mean. A list in the provider's own order is a
+list whose numbering nobody chose, and a channel dialled by number landing
+somewhere unrelated to where the eye expects it is the kind of thing that reads
+as a bug. Neither default changes any behaviour that was not already there.
 
 ## The guide panel is nine programmes, five at a time
 
@@ -233,8 +242,25 @@ guarantee. While nobody is driving it, `ensureGuideVisible` centres that row
 regardless and lets a little empty space sit above the first one. It only does
 this for the row on air: with nothing on air there is no row that has to be
 centred, so the panel fills itself properly instead.
+
+**Or the same nine rows, all of them ahead** — which is now what a new
+install opens on. Settings -> Guide panel offers "Now at the top": the window
+starts at what is on and takes whatever follows, which turns four programmes of
+schedule into nine. Two assumptions had to go with it, both of which existed to
+keep the panel full: the window no longer slides back when fewer than nine
+follow — sliding back is exactly the past it was asked not to show — and a
+short list sits at the top rather than floating in the middle, with the empty
+space underneath.
+
+Centred was the default first and is still the better shape for a channel you
+are half-watching, where what has just been on is as interesting as what is
+next. It lost the default because most glances at the panel are asking what is
+on next, and four rows of that beat eight rows centred on a question that the
+info bar has already answered. Both are one row in Settings; nothing about the
+geometry changed, only which of the two `guideView` starts on.
+
 Going further than the nine is what the catch-up browser is for, and there is
-no setting for the panel.
+no setting for how far it reaches.
 
 
 ## Sizes people can actually read
@@ -243,20 +269,49 @@ The app is looked at from a sofa, sometimes by someone whose sight is not what
 it was, and it was drawn to be glanced at rather than read. Three places were
 too small or too faint, and the fixes are all "bigger, and one contrast step up":
 
-    channel number     19px --text-dim2  ->  24px --text-dim   (the dimmest token there is)
+    channel number     19px --text-dim2  ->  34px semibold --text-mid
     now/next line      17px --text-dim   ->  21px --text-mid
-    channel name       23px             ->  25px
+    channel name       23px regular      ->  25px semibold
     guide programme    20px --text-dim   ->  22px --text-mid
 
 `--text-dim2` is the token for a caption nobody has to read; a channel number
 is not that. The 76px row had the space all along — name, programme and number
 now come to 58px of it.
 
-**The guide panel reads outward from what is on.** Three sizes: the programme
-on air at 27px semibold, the one either side of it at 24px (`.epg-row.near`,
-stamped by the painter at `park ± 1`), and the rest at 22px. The row on air was
-previously the same size as the row four hours ago, which made a panel whose
-whole point is the middle row look like a list.
+
+The channel row ended up separated on three axes rather than one: the number is
+the largest thing in it because it is what people dial, the name is semibold
+against the programme line's regular, and the programme line is a tone down
+from the name. Size alone was not enough — at a glance down a list, weight is
+what the eye reads first, and a 25px name over a 21px programme in the same
+weight read as one paragraph.
+
+**The logo has air on both sides of it.** The gap after it is 22px against
+14px before, because the number column is fixed at 78px — four digits at 34px
+need all of it — and the numbers are left-aligned in it, so anything shorter
+than four digits leaves its own slack in front of the logo. Widening the gap
+after the logo is the half of the pair that can move: narrowing the column to
+balance it would take space four-digit numbers need.
+
+**The row grew to fit them.** 76px to 92px, which is ten channels in the 920px
+scroller rather than twelve, and a 96x70 logo box rather than 52x38. Fewer
+channels on a screen is the cost and it was the right trade: this is a list
+someone scrolls with a remote from three metres away, not a table to scan.
+`--row-h` in the CSS and `ROW_H` in views/channels.js have to agree — the
+windowing counts in rows — and nothing checks that they do. The viewport is
+measured from the DOM once the view is up, so only the row height is hard-coded
+in two places.
+
+**The guide panel reads outward from what is on.** Two sizes: the programme on
+air at 27px semibold, everything else at 22px. The row on air was previously
+the same size as the row four hours ago, which made a panel whose whole point
+is the middle row look like a list.
+
+There were three for a while — a `.near` class one size down on the rows either
+side of the middle, stamped at `park ± 1`. It was a gradient of importance
+nobody asked for: what is on matters, and the other eight are a schedule that
+should read as one column. Reading down four sizes is slower than reading down
+two, so the middle class went.
 
 Two constraints hold the type in: every row stays **exactly 60px**, because
 `GUIDE_H`, `PANEL_VIEW` and the scroller's height are all counted in rows and
@@ -282,6 +337,80 @@ channels cannot hold one number, because the remote reaches whichever the list
 hits first. If the number is taken it offers to **swap**, and `numberHolder`
 checks `numOf` across `all` rather than the filtered `view` — a clash with a
 channel that happens to be filtered out of sight is still a clash.
+
+## Ten languages, and the English is the key
+
+`js/i18n.js` is the translator, `js/lang.js` the nine dictionaries. **The key is
+the English string itself** — `T('Press OK to play')`, not `t('preview.hint')` —
+which decides most of the rest:
+
+- a missing translation falls back to something a person can read,
+- the English build needs no dictionary at all,
+- a string added in a hurry works everywhere before anyone has translated it,
+- and changing an English wording silently drops that string back to English in
+  the other nine. That last one is the price, and it is paid by a test.
+
+`test-units.js` reads every translated string out of the shipped source the way
+a person would grep for it — `T('...')` in the JS, `data-i18n` in the markup,
+and what the settings screen hands to `row()` and `cycle()`, which translate
+inside the helper so the literal never sits next to a `T`. A language missing
+any of them fails the suite. **358 keys, ten languages.**
+
+Some strings reach the translator through a variable and cannot be seen by any
+scan: day and month names, the built-in group names, the keyboard reference,
+the parser's placeholders for a nameless channel. Those are listed in
+`I18N.EXTRA`, which the same test folds into the key set. Adding one means
+adding it there too — the price of translating at paint time, which is what
+makes switching language instant.
+
+**Placeholders are the contract.** `T('Set to {n}', { n: 4 })` rather than
+concatenation, because word order is the first thing a translation changes. The
+test checks that every translation carries the same placeholders as its key: one
+may move within a sentence, none may be dropped. A parameter nobody supplied is
+left as `{n}` rather than printed as "undefined" — a half-built sentence is
+easier to spot in a screenshot than a plausible wrong one.
+
+**Switching is instant and touches everything.** `I18N.set(code)` swaps the
+dictionary, restamps every `data-i18n` element in the markup, and sets
+`<html lang>`, which is what a TV uses to pick a font for Japanese or Hindi.
+`App.onSettingChanged('settings.lang')` then rebuilds the channel list and the
+settings screen, because both bake their text in when they build their rows.
+Nothing reloads.
+
+Settings -> **Language**, and its values are the languages' own names —
+Español, Русский, 日本語. A language list is the one screen a viewer cannot be
+expected to read in the language they are trying to leave. The default is
+"Follow the TV", which reads `navigator.language`.
+
+Two things worth knowing before this reaches a television:
+
+- The translations were written here in one pass. They are meant to be correct
+  and plain rather than idiomatic, and no native speaker has read them. Every
+  one of them is one line in `js/lang.js`.
+- **Fonts are the risk.** Cyrillic, Devanagari, Japanese and Korean all need
+  the set to have a font for them. Tizen ships a broad font set and `<html
+  lang>` helps it choose, but this cannot be verified from here — if a language
+  comes out as boxes on the TV, that is what happened, and it is the same class
+  of problem as the emoji in the side panels.
+
+## The row playing is outlined, not dotted
+
+In the channel list, what is playing carries a red outline around the whole
+row — `box-shadow: inset`, so nothing in the row moves when it arrives and the
+outline follows the row's own corner radius. A focused row that is also playing
+keeps its lift as well, since the two shadows compose.
+
+It was a 12px dot at the left edge, which is a marker the size of a full stop
+on a list read from across a room. The guide panel and the badge keep the dot:
+they are single objects being labelled, not a row in a column of rows.
+
+## The red dot means "this one is on now"
+
+Three places wear it: the badge over the picture, the programme on air in the
+guide panel, and the channel playing in the list. It started as a play triangle
+in the panel and a red bar in the list — two marks for one fact, neither of
+which said which fact. A circle needs no glyph and no font, which is why it is
+drawn rather than typed, like the heart, the padlock and the replay clock.
 ## Parental control
 
 `U.isAdult` matches the group or the name. The word boundary matters: without
@@ -461,7 +590,7 @@ a tofu box inside a label. If the TV does show boxes, the fix is to empty
 
 The panel under the preview is somewhere to go again. Right is not the way in —
 right is about the channel — so there are two others, neither of which takes a
-key from anything else: **INFO** (one press) and **What's on** in the channel
+key from anything else: **INFO** (one press) and **Schedule** in the channel
 panel. INFO used to raise a toast repeating the name of the row the cursor was
 already on.
 
@@ -495,6 +624,14 @@ as it stands.
 The panel holds nine programmes and shows five of them (see above), and the
 replay clock on the finished ones is 19px rather than 13px, which is the
 difference between a marker and a speck at three metres.
+
+
+A reminder that goes off over a picture has to introduce the programme, not
+just name it: the popup carries the channel's logo and the description the
+guide gave, clamped to four lines. Both are stored with the reminder when it is
+set — the guide may have been rebuilt or dropped by the time it fires — and
+both are looked up again at the moment it fires, because a refresh since then
+may have a better description. Stored is the fallback, not the source.
 
 ## Next steps
 
@@ -707,10 +844,164 @@ as the left-hand drawer so the two read as a pair.
 
 The guide panel under the preview was read-only for several versions, because
 right was the only way into it and that key was wanted here. It is a place
-again in 0.7.15, reached by INFO or by the panel's own "What's on" row — see
+again in 0.7.15, reached by INFO or by the panel's own "Schedule" row — see
 "Reminders, and the way back into the guide panel". Right still does not go
 there: right is about the channel, and its schedule is one of the things the
 channel offers.
+
+## The TV catalogue is a channel and an evening
+
+The guide panel beside the player shows nine programmes of the channel under
+the cursor, which is a glance. The catch-up browser shows one channel's past.
+Neither lets somebody sit down and read an evening, so `views/catalog.js` does:
+every channel down the left, and the whole schedule of whichever one is
+selected down the right, as far ahead as the guide reaches.
+
+**It was built the other way round first** — hours down the left, every channel
+with something starting in that hour down the right — which answers "what is on
+at eight". That is a fair question and it was not the one being asked. Turning
+it round threw away most of the implementation with it: there is no
+cross-channel scan any more, so the binary search over five thousand programme
+lists went, and what is left is `EPG.list()` for the one channel the cursor is
+on.
+
+**Which side is windowed swapped too.** The playlist can be five thousand long,
+so the channel column is a pool of sixteen rows moved and refilled, the same
+as the browse list. One channel's schedule is tens of programmes, so it is
+painted whole — and only when the channel changes, because walking the cursor
+down a hundred programmes must not rebuild them a hundred times.
+
+**It opens on the channel being watched**, so it starts where the viewer
+already is rather than at the top of a list of thousands.
+
+The schedule is broken by day, because one that runs past midnight otherwise
+counts back to nine in the morning with no explanation. Where the cursor is has
+to be read off the element rather than worked out from an index — the day
+headings make the rows an uneven ladder, and `idx * ROW_H` stops being true the
+moment one appears.
+
+OK does what OK does in the guide panel: watch it if it is on, replay it if the
+provider kept it, be reminded if it has not started.
+
+## The drawer holds what is nowhere else
+
+Left from the groups rail opens a drawer, and it used to offer Favourites and
+Recently watched — which are the first two rows of the rail the viewer has just
+walked through to reach it. Two ways to the same place, one of them further
+away than the other. They are gone; what is left is Search, Catch-up, Settings,
+Reload playlist, Exit, and the keyboard reference off the TV.
+
+`goGroup()` went with them. It existed only to serve those two rows.
+
+## The head of the list is a clock
+
+A television is also the thing people look at to find out the time, and the
+head of the channel list was the emptiest, most looked-at strip on the screen —
+carrying one line that said "ALL CHANNELS", which is the thing the viewer is
+least likely to be wondering. The time and the date lead now, at 42px, and the
+name of the list sits under them: it still has to say which list this is, it
+just is not the headline. The head grew from 96px to 132 and the scroller
+starts lower to match.
+
+Ticked every ten seconds rather than every minute, because a clock that is a
+minute behind is worse than no clock, and a text write costs nothing beside
+what the guide tick already does. `Channels.show()` paints it too — coming back
+from Settings after five minutes must not show the time it was when you left.
+
+## The wordmark, and where it goes
+
+`img/logo.png` is the first thing in the package that is neither markup, style,
+script nor a launcher icon: the wordmark on transparency, 900px wide because
+the largest place it is drawn is 680 and the app draws in a fixed 1920x1080
+with no second density to serve — headroom over the largest use and no more.
+It is 135 KB, which is real weight in a 745 KB package and was the price of
+asking for a bigger logo; PNG has no quality dial, and quantising a smooth
+gradient to a palette bands it visibly on a television.
+
+It replaces the playlist's name at the head of the groups rail. The name is the
+one thing on that screen the viewer already knows — they typed it — and the
+rail head is the most looked-at corner of the app. The name is still in the
+drawer's foot, where it answers "which playlist is this" for somebody who has
+more than one.
+
+The drawer gets it too, where the app's name used to be spelled out in
+letter-spaced capitals — which is a wordmark drawn badly.
+
+Settings gets it twice: small at the top left, so the two screens are
+recognisably one app, and large to the right of the rows. Making that one 680px
+took narrowing the rows from 1100 to 980, which was worth doing on its own:
+the value floated to the far end of 1100px, so the eye had a very long way to
+travel from a label to what it was set to.
+
+Adding it meant `img/` had to be staged by both packagers — the .wgt's file
+list and the APK's Gradle copy — and the test that keeps those two lists
+agreeing had to learn about it, which is exactly what that test is for.
+
+## Settings is read from a sofa too
+
+It was the one screen still written at desktop sizes: a 26px label over an 18px
+sub-line in the dimmest token the app has. Both went up a size and a contrast
+step.
+
+Every row is bold. The three people actually come here for — **Playlist**,
+**Language**, **Theme** — are *larger* rather than heavier, at 30px against 27.
+Weight was the difference at first and stopped being one the moment everything
+got it: a list where the only distinction is weight and everything has it has
+no distinction at all. Their value was in the accent colour for a while too,
+which read as a link rather than a setting — it is the same colour as every
+other value now, and an e2e assertion holds it there.
+
+The sub-line had to be told not to inherit the weight, because it lives inside
+the label element — a bold explanation under a bold heading is two headings.
+
+## A list, where a cycle was ten presses
+
+Every settings row was a cycle: left and right step through the values. That is
+right for two or three of them and wrong for ten. Overshooting the language you
+wanted meant nine more presses to come back round — in a language you may no
+longer be able to read, which is exactly the state somebody is in when they are
+on that row.
+
+`U.pick(title, items, current, cb)` is a list over whatever asked for it, keyed
+like the other overlays: `keys.js` checks `U.pickOpen` before it hands anything
+to a view, so nothing underneath has to know it is up. Back closes it without
+changing anything, which a cycle cannot offer — a cycle has already changed the
+setting by the time you see what it did.
+
+The test for it picks Spanish through the list and then puts it back through
+the same list, which is the only way to know the thing is usable by somebody
+who cannot read what is on it.
+
+## Six ways to write a date
+
+Nobody agrees and everybody is sure, so `settings.dateFormat` has six values
+and `U.dateLabel(date, fmt)` renders them. Not read off the locale: that would
+be guessing at the viewer from the language their television is set to, and a
+Brit with an American set would get the wrong one with nowhere to say so.
+
+The row shows **today** written the way each format writes it, rather than a
+named convention. That started as six example strings — "29/08/2026",
+"Saturday 29 Aug" — which went through the translator because every cycle label
+does, so nine dictionaries were being asked to translate a worked example of a
+number format. Rendering the real date costs no strings at all and answers the
+question the viewer actually has, which is what it will look like.
+
+The formatter lives in `util.js` because two screens need it, and a second copy
+of "how do we write a date" is how the two of them drift.
+
+## Search came off the rail
+
+The foot of the groups rail had two rows, Search and Settings. Search is on the
+green button, it is in the drawer, and it is reachable from anywhere — a third
+way in cost a row at the foot of every screen and one more stop for the cursor
+to pass through on its way to Settings. `RAIL_FEET` is one entry now.
+
+The three dots beside Settings became a settings mark while that was open.
+Sliders rather than a gear: a gear is a ring of teeth and reads as a smudge at
+three metres, and the dots were never a settings mark in the first place —
+three dots means *menu* everywhere, which is the wrong promise for a row that
+opens settings. Six shapes are needed and a span carries three, so the other
+three are box-shadows of those.
 
 ## The rail folds, and carries its own buttons
 
@@ -718,6 +1009,40 @@ The groups rail is 280px while the cursor is in it and 26px when it is not
 (`#stage.rail-in`), with a chevron for a handle and its contents faded out —
 half-clipped group names read as a rendering fault rather than as a drawer.
 The channel list takes the width back.
+
+**The fold does not animate**, and that is the third answer rather than the
+first. It was 180ms, then 110ms, and both looked laggy for a reason no
+duration could fix.
+
+The same keypress that folds the rail also calls `repaintAll()`, which
+re-stamps eighteen channel rows, twelve group rows and the preview block. A
+CSS transition's clock starts when the class is set and keeps running while
+the main thread is busy, so the first frame the viewer actually sees is the
+animation already part-way through. Traced on a 5,000-channel list, frames
+landed at 3ms and 7ms and then not again until 21ms, by which point the rail
+had jumped from 39px to 90px. On a television, where that re-render costs ten
+times as much, the jump *is* the animation.
+
+There were two ways out. A `transform` would have been immune to it —
+compositor animations do not care what the main thread is doing — but this
+fold cannot be expressed as one: the channel list does not slide out of the
+way, it takes the 254px, and that is a layout change whatever property asks
+for it. So the other way. One paint, no clock to fall behind.
+
+What it bought, over eight folds of a 5,000-channel list:
+
+    layout passes   190  ->  8      (one per fold, which is the floor)
+    layout time     64ms ->  4ms
+    worst frame     14.9ms -> 3.7ms
+
+The measurement is the point. Animating `width` and `left` had been costing a
+relayout of the whole list on every frame of the transition, and the fix was
+not a faster easing curve — it was noticing that the transition was the thing
+asking for the work.
+
+Neither side panel is animated either. The drawer and the channel panel are a
+`.hidden` class each: they are answers to a button, and an answer that slides
+in is an answer that arrives late.
 
 Two fixed rows live at its foot, below every group: **Search** and
 **Settings**, walked into with down from the last group (`railFoot`: -1 nowhere,
@@ -733,6 +1058,20 @@ the first, in the channel list and in the channel-numbers screen alike. On five 
 apart. Up from the first row used to open the search box, which is why search
 moved somewhere it can be seen.
 
+## A refusal that says which thing is missing
+
+"This channel cannot be rewound" is true and useless: it reads as the app
+failing rather than as the provider not offering something. Both places that
+refuse — `scrub()` on a channel with no catch-up, and `playAt()` when no URL
+can be built for a moment — now say **"This channel cannot be rewound — it has
+no catch-up"**, borrowing the wording `playCatchup()` already uses one function
+away rather than inventing a second way to name the same thing.
+
+It is one constant, `NO_CATCHUP`, because two call sites saying the same thing
+in two string literals is two things to keep in step. That puts it out of reach
+of the key scanner in `test-units.js`, which reads `T('...')` literals — so it
+is listed in `I18N.EXTRA`, which is what that list is for.
+
 ## Two channels cannot share a number
 
 Numbering a channel onto a number that is already taken offers to **swap** the
@@ -740,6 +1079,16 @@ two rather than duplicating it: a duplicate cannot be dialled, because the
 remote reaches whichever the list happens to hit first. `rowWithNumber` checks
 the numbers actually on screen, not just the overrides, since most channels are
 on the number the playlist gave them.
+
+**Typing the original number back is not a change.** It was stored as an
+override like any other, so the number stayed amber and the Reset row kept
+something to undo that would have undone nothing — which reads as "putting it
+back did not work". `Store.setChannelNumber(pid, key, n, orig)` takes the
+playlist's own number as a fourth argument and clears the record instead of
+writing it. Both painters were also asking the wrong question: they marked a
+number as changed when a record existed, not when it differed, so they check
+the value now and a playlist numbered this way before today comes out right
+without a migration.
 
 ## What the guide keeps, and for how long
 
@@ -777,6 +1126,24 @@ the bar has to grow both or the bottom row ends up against the screen edge —
 which is worse on a TV than it looks in a browser, because of overscan.
 Measured after the change: the NEXT line ends 38px clear of the bottom.
 
+## Settings does not stop the channel
+
+Opening Settings used to call `Player.stop()`, so changing one row cost the
+several seconds it takes to open the stream again on the way back. A television
+menu opens over what you were watching and leaves it running, and that is what
+this does now: the sound carries on, and `Channels.hide()` takes the video
+layer with it so the picture is put away.
+
+That last part is only needed in a browser, where the video is a real element
+sitting *above* the panes and would otherwise float over the settings screen.
+On either TV the picture is behind the page and those screens paint their own
+opaque background over it, so hiding the layer changes nothing there. It also
+means the same line fixed the catch-up browser and the catalogue, which had the
+same problem and nobody had noticed.
+
+It makes the picture-size row honest as a side effect: it now applies to a
+player that is actually running, rather than to the next one to start.
+
 ## The overlays keep the dark palette in both themes
 
 `#osd`, `#zap` and `#ts-clock` sit on a dark scrim over a broadcast picture,
@@ -788,9 +1155,18 @@ colour. An e2e section asserts the direction (bar text light, page text dark,
 and the ranking title > description > next), because the exact hex will move
 and the relationship must not.
 
-The light theme itself came down a second step in 0.7.14 (`--bg` #dfe4ed ->
-#ccd3df, `--bg-2` #eef1f6 -> #d9dfe9, body #d6dce6 -> #c2cad7). It is a lamp,
-not a page.
+The light theme itself has come down three times: #dfe4ed -> #ccd3df in
+0.7.14, and #ccd3df -> **#b4bdcb** in 0.7.28, with `--bg-2` and the body
+following each time. The first two attempts were still trying to be *light*,
+which is the mistake — 55 inches of pale grey-blue in a dark room is a lamp
+pointed at the viewer, and reading "still too bright" twice is what it took to
+stop treating brightness as the goal. What it is now is a mid grey-blue with
+near-black text on it, around 9:1, so nothing was traded away for it: the
+contrast went up as the surface came down.
+
+The e2e section on it asserts a band rather than a value — light enough not to
+be the dark theme, dark enough not to be paper — so a fourth step down would
+still pass and a return to white would not.
 
 ## Back takes one layer off at a time
 
@@ -841,6 +1217,26 @@ grows a hint ("OK for live") when it has the cursor. Anything other than OK
 lets it go. The same jump is in the channel panel as "Back to live" whenever
 `isBehind()`, and a mouse can simply click the badge.
 
+**And in the info bar, for the other way of being behind.** The badge is for a
+stream that fell behind on its own; winding a channel back with the seek keys
+is deliberate, and the way back from that used to be the channel panel — two
+presses and a menu, for something the viewer just did. `#osd-back` is a red
+"Back to live" pill next to the channel number, reached exactly as the badge
+is: up focuses it, OK returns to live, anything else lets it go.
+
+It was outlined and 17px first, which is a desktop button: on a television it
+was a thin red line beside a number. Filled, 24px, and focus **inverts** it to
+white on red with a red ring — a red button that only goes slightly redder is
+not a state change anybody can see from a sofa. An e2e section asserts the two
+states and that it sits on the channel number's own line rather than taking a
+line above the channel name.
+
+It is painted with the bar rather than on its own, which decides the rest of
+its behaviour: it exists only while the bar is up, `hideOsd` drops the focus
+with it, and focusing it calls `showOsd` again so the bar does not time out
+while it is being aimed at. It is hidden for a recording — `Player.seekable()`
+is true there and there is no live edge to go back to.
+
 ## Diagnostics, because the TV cannot be watched from here
 
 Settings ends with rows fed by `Player.diag()`: the window size and stage scale,
@@ -849,18 +1245,286 @@ method the set accepted, the source's own resolution, the player state, and the
 last error AVPlay returned. Three rounds of guessing at second hand is what they
 are for — when the picture is wrong, that screen says why.
 
+## Android TV is the same app behind a different shell
+
+`android/` is a Kotlin project whose entire job is to give the web app three
+things a browser will not: a decoder of its own, HTTP without an origin
+attached to it, and the keys off a remote. It is about 700 lines. Everything a
+viewer sees is still `app/`, staged into the APK's assets by Gradle, so there
+is one copy of the app and one set of tests over it.
+
+That was the plan written down long before it was needed, and it survived
+contact: `player.js` and `keys.js` were the only files that touched a platform,
+plus `net.js`, which already had a switch for its own dev proxy.
+
+### Why a WebView and not a rewrite
+
+The alternative is Leanback and Compose and a second UI, and then two of
+everything: two channel lists, two guide panels, two sets of nine
+dictionaries, two lots of the arithmetic that decides where a picture goes.
+The web app is 800-odd tests deep and none of them would have come along.
+
+The WebView is also a much better one than Tizen's. Chromium 56 is the floor
+the app is written to; Android TV boxes ship something far newer, so nothing
+had to be given up to run on both.
+
+### isTizen meant two things, and now says which
+
+Nearly every `isTizen` in the app did not mean "this is a Samsung set". It
+meant "there is a real player behind the page rather than a `<video>` in it",
+which is now true of two platforms and false of one. Those became `isTV`:
+
+    U.isTizen     this is a Samsung set
+    U.isAndroid   this is the Android shell   (the bridge object is the tell)
+    U.isTV        either of the above
+    U.platform    'tizen' | 'android' | 'browser'
+
+Of the twenty-eight uses, three stayed `isTizen` — the AVPlay calls, the
+Tizen key registration, and the settings row that names the platform. The rest
+were about capability all along. The CSS went the same way: the `.tizen` rules
+that keep the page from painting over the video plane are now `.tv`, because
+they were never about Samsung either, and `app.js` stamps both a platform class
+and a `tv` class so a rule that really is about one set still has somewhere to
+go.
+
+### The picture: the app decides, the shell places
+
+This is the part that mattered most, and it was already right.
+
+On Tizen the app works out the picture's rectangle itself — including the
+letterboxing, from the source's shape and the viewer's picture-size setting —
+and hands AVPlay four numbers, because every time the platform was asked to
+shape the picture as well, the two fought and something was cropped or refused
+to scale. Android gets exactly the same treatment: ExoPlayer draws on a
+`SurfaceView` that is moved and resized to the rectangle and stretches the
+video to fill it, and nothing on the Kotlin side has an opinion about aspect
+ratio at all.
+
+So a 4:3 channel fullscreen arrives as `setRect(240, 0, 1440, 1080)` — pillars
+either side because the app put them there. There is a unit test that says so,
+and another for a window that is not 1920x1080, where the page's fixed
+coordinate space and the window's real pixels stop agreeing.
+
+### Three problems the shell solves
+
+**A decoder.** ExoPlayer (Media3) on a `SurfaceView` underneath a transparent
+WebView, which is the same arrangement as AVPlay's hardware plane behind the
+widget. `PlayerBridge` is the `AquaPlayNative` object `player.js` calls, and
+its events are named the way AVPlay names its own so both TV paths report the
+same things and nothing upstairs can tell them apart.
+
+Two rules run through it. Commands are posted to the main thread, because
+ExoPlayer may only be touched on the thread that built it; questions are
+answered from a snapshot the main thread keeps up to date, because a getter
+that blocked would deadlock the page the first time the main thread was busy
+opening a stream. And `durationMs` returns zero for anything live —
+`player.js` turns "has a duration" into "can be sought", and ExoPlayer's
+`TIME_UNSET` is a large negative number that would otherwise sail through as
+truthy and offer a scrub bar over a window that keeps moving.
+
+**HTTP with no origin.** The page is served from `appassets.androidplatform.net`
+over https — a real origin, so `localStorage` persists and the app is not a
+special case of itself — and every external request is answered by `NetBridge`
+in `shouldInterceptRequest` rather than by the WebView. A page has an origin
+and a provider has never heard of CORS: left alone, the request goes out, the
+playlist comes back, and the WebView throws it away unread. Answering it
+ourselves means the response can say what it needs to about origins, which is
+the same thing `<access origin="*">` does in config.xml. `net.js` therefore
+switches its dev proxy off on Android exactly as it does on Tizen.
+
+Two details in there are load-bearing. `Accept-Encoding: identity`, because a
+`WebResourceResponse` body is handed to the WebView as-is and a gzipped stream
+forwarded with the header intact arrives as noise. And redirects are followed
+by hand, because `HttpURLConnection` refuses to follow one that changes
+protocol and http → https is exactly what a catch-up URL tends to do.
+
+**The remote.** Split in two, on purpose. The D-pad, Enter and the number keys
+reach the WebView as ordinary DOM keydowns and are left entirely alone —
+`keys.js` already knows what to do with an arrow, and routing them through
+Kotlin would mean reimplementing "is a text field focused" over there. BACK,
+the media transport, the coloured buttons and INFO/GUIDE never arrive at all:
+Android takes them first. Those are translated in `dispatchKeyEvent` into the
+same action vocabulary and injected through `Keys.inject()`, which is the door
+every other key already comes through.
+
+`Keys.inject` drops an action it does not recognise, because the shell is the
+one caller that can invent one. A unit test reads the Kotlin table, checks
+every action in it is one `keys.js` accepts, and checks the D-pad codes are
+*absent* — a D-pad routed through Kotlin is a text field that cannot be typed
+in, and that is a bug you only find on somebody's sofa.
+
+### One version, one file list
+
+`build.gradle.kts` reads the version out of `app/config.xml` and derives the
+version code from it, so there is one number to bump rather than two. A unit
+test runs the Gradle file's own regular expression against config.xml and
+checks it still finds the version the rest of the project is on — a reformat of
+that file will fail the suite instead of quietly shipping an APK numbered zero.
+
+The same test compares the APK's staged file list against `pack.js`'s `STAGE`.
+Two packagers shipping different subsets of the same app is the kind of
+difference that surfaces as one bug report nobody else can reproduce.
+
+### Cleartext is not optional
+
+IPTV providers are overwhelmingly plain http, and Android has blocked
+cleartext by default since Pie. `network_security_config.xml` permits it.
+Refusing would not be a security posture; it would be an app that cannot reach
+most playlists.
+
+### The icons
+
+`make-icon.js` grew from the same artwork as everything else: a 320x180
+launcher banner, the square launcher icon at four densities, and an adaptive
+icon's foreground layer. The banner is the large logo again at a twentieth of
+the size and flattened, because an Android TV tile is opaque — the wordmark is
+composited over the vignette in the build rather than shipped as a second file.
+An app with no banner does not appear on the Android TV home screen at all.
+
+**The adaptive icon is not optional.** From API 26 a launcher draws the icon
+itself from two layers and masks them to whatever shape it likes; an app that
+supplies only a legacy PNG gets that PNG *shrunk* into the middle of a
+generated shape. Which is exactly what "the icon looks too small" turned out to
+mean. `mipmap-anydpi-v26/ic_launcher.xml` names a flat background colour and a
+foreground drawn on 108dp of canvas, of which only the middle 72 is guaranteed
+to survive — so the mark is 60% of it, well inside. A flat colour rather than
+the vignette, because a launcher may slide the two layers against each other
+and a gradient moving under a wordmark looks like a printing fault.
+
+### The icons were also too small on purpose, by accident
+
+The application icon was a *crop* of the artwork, and a crop cannot make the
+mark any bigger than it already was in the square it came from: 86% of the
+width and 34% of the height, with 140px of empty vignette above and below.
+Composing it instead — the same way the banner already was — makes the share a
+number somebody chose. At 0.94 the mark went to 93% of the width and the side
+margins halved.
+
+The height did not move much, and cannot. The wordmark is 3.1:1 and the tile is
+1.21:1, so a mark that fills the width is about 37% of the height and the band
+above and below it is the shape of the artwork rather than a mistake in the
+build. Filling a squarish tile needs a squarish mark — a monogram, which this
+artwork does not contain separably: the wave runs through all four letters, so
+there is no column gap to cut the A out on.
+
+A unit test asserts the width the mark covers, because "it looks small" is a
+claim about a ratio and a ratio can be measured.
+
+### What the compiler found
+
+It builds. `app-debug.apk`, 4.9 MB, version code 70029 and version name 0.7.29
+both read out of config.xml, leanback-launchable, with all 22 files of the web
+app inside it. The toolchain went in for it: Temurin 17, the Android SDK with
+platform 34, Gradle 8.7, and a wrapper generated from that.
+
+Three things were wrong that no amount of reading had caught, and all three are
+the kind that only a compiler or a launch can tell you:
+
+- **A Kotlin raw string cannot end with a quote.** The regular expression that
+  reads the version out of config.xml ended with one, so the closing delimiter
+  swallowed it and the string ended a character early. The quote is a character
+  class now. Worse, the unit test *passed* on it — it extracted the pattern with
+  a lazy match that stopped at the very quote that was the problem, so it was
+  testing a shorter regex than Kotlin would ever see. That test is anchored now
+  and asserts the pattern does not end on a quote.
+- **AppCompatActivity throws on a theme that is not AppCompat.** The theme here
+  is Material, deliberately, and nothing in the app used AppCompat at all — so
+  the activity is a plain `Activity` and the dependency is gone. This one would
+  not have failed the build; it would have failed a second after launch.
+- **Int literals do not assign to Long.** `coerceAtLeast(0)` on a position in
+  milliseconds, four times over.
+
+And one thing that looked right and was cargo: `-opt-in=…UnstableApi` as a
+compiler flag. Media3 1.3's `@UnstableApi` is not a Kotlin opt-in marker, and
+the compiler said so about the flag itself. The annotation on the class is what
+Android Lint actually reads; the flag is gone and the test checks the
+annotation instead.
+
+### What a device still has to say
+
+Compiling is not running. In rough order of how likely they are to be wrong:
+the surface's z-order against the WebView on a particular box, which
+colour-button keycodes a given remote actually sends, whether
+`setForceLowestBitrate` releasing after four seconds is soon enough to matter,
+and how the shell behaves when a stream ends while the app is in the
+background.
+
 ## Known gaps
 
 - The package is **unsigned**, and that, not the App ID, is what stops a TV
   install. `npm run pack` (`tools/pack.js`, Node only — a .wgt is just a zip
-  with config.xml at the root) writes `AquaPlay-0.7.21.wgt`: 22 files, 332 KB
-  raw, 105 KB packed. Unpacked and served on its own it boots with no missing
-  references — only `$WEBAPIS`, which resolves on the TV — so signing really
-  is the only step left. The 10-char package id `AquaPlay01` is well-formed
-  and only needs changing if Tizen Studio's wizard issues a different one.
+  with config.xml at the root) writes `AquaPlay-0.7.35.wgt`: 26 files, 759 KB
+  raw, 348 KB packed — the nine dictionaries are most of it. It came down 130
+  KB when the icon did: a 24-bit 512x423 tile is 83 KB where the 32-bit
+  512x512 was 217, and none of that compresses. Unpacked and served on its
+  own it boots with no missing references — only `$WEBAPIS`, which resolves
+  on the TV — so signing really is the only step left. The 10-char package
+  id `AquaPlay01` is well-formed and only needs changing if Tizen Studio's wizard issues a
+  different one.
 - M3U parser treats `group-title="Animation;Comedy"` as one literal category.
   Playlists that pack multiple categories into one attribute (iptv-org does)
   splinter into near-duplicate single-channel groups.
+
+
+## Four icons, and only one of them is square
+
+Samsung asks for four things and they are different shapes:
+
+| file | size | depth | what it is |
+| --- | --- | --- | --- |
+| `app/icon.png` | 512x423 | 24-bit | the application icon, the one in the .wgt |
+| `branding/testing-icon-117x117.png` | 117x117 | 24-bit | the small icon while an app is side-loaded |
+| `branding/banner-background-1920x1080.png` | 1920x1080 | 24-bit | large logo, the part underneath |
+| `branding/banner-logo-1920x1080.png` | 1920x1080 | 32-bit | large logo, the wordmark over it |
+
+Each under 300 KB. The first one is the one that was wrong: a TV tile is wider
+than it is tall, and this shipped a 512x512 icon until the guidelines were read
+properly, so the launcher was letterboxing the artwork into its own tile.
+
+`npm run icons` builds all four from `tools/icon-source.jpg`, which is the
+artwork at full size and the only thing any of them come from — keep it.
+`node tools/make-icon.js --check` reads what is on disk instead and says
+whether it still fits, and `test-units.js` asserts the same table so a
+regenerated set that drifts fails the suite rather than the submission form.
+
+**Square to tile.** The wordmark sits across the middle third of the artwork,
+so the icon is a crop, not a fit: the empty top and bottom go and the wordmark
+keeps its proportions, which also leaves it bigger in the tile than fitting the
+whole square between two bars would have. The crop is centred on the wordmark
+rather than on the image, because the wordmark sits slightly low. The 117 is
+the whole square, which is what a square asset wants.
+
+**The large logo is two files**, and Seller Office composites them. Neither is a
+scaled copy of the artwork:
+
+- The background is the artwork's own vignette, measured off it and redrawn at
+  16:9 — 21 grey in the middle, 40 in the corners, falling off as the 5.3th
+  power of the distance out. The exponent is not a guess: a five-by-five grid
+  of samples fits it to within one step, and a straight radial was out by ten.
+  Redrawing rather than scaling means no JPEG noise to compress and no seam at
+  any size.
+- The wordmark is keyed off the same measurement. Alpha is how far a pixel sits
+  above the background it was laid on, and the colour is then un-composited —
+  `mark = (src - bg(1-a)) / a` — so the soft edges stay the colour of the mark
+  instead of fading through grey on somebody else's background. Keying without
+  that step is what makes a cut-out logo look dirty.
+
+**Why the PNGs are written here.** Three of the four have to be 24-bit and
+Chrome's canvas only ever writes 32-bit RGBA, so the pixels come back raw and
+`make-icon.js` encodes them: colour type 2 or 6, zlib at level 9, and a filter
+picked per row by the sum-of-absolute-differences rule from the PNG spec. The
+filtering is worth about 6% on the tile and 14% on the gradient — not the
+difference between passing and failing the 300 KB limit, but it is thirty lines
+and it is measured rather than assumed. What did matter was the depth: the old
+32-bit 512x512 was 217 KB, and the 24-bit tile is 83 KB.
+
+Chrome does the decoding and the scaling. There is no image library in this
+project and one resize is not worth becoming the largest dependency in it;
+playwright-core is already here for the browser tests.
+
+Only `icon.png` goes in the package — `pack.js` stages files by name, and a
+test asserts `branding/` is not among them. The rest is for the submission
+form.
 
 ## Testing with a real playlist
 

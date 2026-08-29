@@ -11,7 +11,7 @@
       kind: 'cycle', path: path, values: values, labels: labels,
       get: function () {
         var v = get(path), i = values.indexOf(v);
-        return labels[i === -1 ? 0 : i];
+        return T(labels[i === -1 ? 0 : i]);
       },
       step: function (d) {
         var v = get(path), i = values.indexOf(v);
@@ -23,6 +23,26 @@
   }
 
   function toggle(path) { return cycle(path, [true, false], ['On', 'Off']); }
+
+  /* Same shape as cycle(), but the label of each value is that value applied
+     to today rather than a word for it. */
+  function dateCycle() {
+    var values = ['long', 'short', 'dmy', 'mdy', 'iso', 'off'];
+    var path = 'settings.dateFormat';
+    return {
+      kind: 'cycle', path: path, values: values,
+      get: function () {
+        var v = get(path);
+        if (values.indexOf(v) === -1) v = 'long';
+        return v === 'off' ? T('Off') : U.dateLabel(new Date(), v);
+      },
+      step: function (d) {
+        var v = get(path), i = values.indexOf(v);
+        if (i === -1) i = 0;
+        Store.set(path, values[(i + d + values.length) % values.length]);
+      }
+    };
+  }
 
   function get(path) {
     var parts = path.split('.'), o = Store.all();
@@ -36,19 +56,52 @@
      more thing to get out of. */
   var advOpen = false;
 
+  /* '' first: following the TV is the default and has to be reachable, and a
+     language's own name is never translated — somebody who cannot read the
+     language the app is currently in still has to find their way out of it. */
+  function langCodes() {
+    var out = [''];
+    for (var i = 0; i < I18N.LANGS.length; i++) out.push(I18N.LANGS[i].code);
+    return out;
+  }
+
+  function langNames() {
+    var out = [T('Follow the TV')];
+    for (var i = 0; i < I18N.LANGS.length; i++) out.push(I18N.LANGS[i].name);
+    return out;
+  }
   function build() {
     var p = Store.activeProfile();
     rows = [];
 
-    rows.push({ kind: 'action', label: 'Playlist',
-      sub: p ? (p.type === 'xtream' ? 'Xtream Codes · ' + p.host : 'M3U · ' + shortUrl(p.url)) : 'None',
-      value: p ? p.name : '—', run: function () { App.openSetup(true); } });
+    key(rows.push({ kind: 'action', label: T('Playlist'),
+      sub: p ? (p.type === 'xtream' ? 'Xtream Codes · ' + p.host : 'M3U · ' + shortUrl(p.url)) : T('None'),
+      value: p ? p.name : '—', run: function () { App.openSetup(true); } }));
 
-    rows.push({ kind: 'action', label: 'Reload playlist',
-      sub: 'Fetch channels and guide again', value: '', run: function () { App.refreshPlaylist(); } });
+    rows.push({ kind: 'action', label: T('Reload playlist'),
+      sub: T('Fetch channels and guide again'), value: '', run: function () { App.refreshPlaylist(); } });
 
-    rows.push(row('Theme', '',
-      cycle('settings.theme', ['dark', 'light'], ['Dark', 'Light'])));
+    /* A list rather than a cycle. Ten languages one key at a time means
+       eight more presses if you overshoot, in a language you may no longer be
+       able to read — which is exactly the state somebody is in when they come
+       to this row. */
+    key(rows.push({ kind: 'action', label: T('Language'),
+      sub: T('What the app is written in'),
+      value: langNames()[Math.max(0, langCodes().indexOf(get('settings.lang') || ''))],
+      run: function () {
+        var codes = langCodes(), names = langNames();
+        var items = [];
+        for (var i = 0; i < codes.length; i++) {
+          items.push({ value: codes[i], label: names[i] });
+        }
+        U.pick(T('Language'), items, get('settings.lang') || '', function (code) {
+          if (code === null) return;
+          Store.set('settings.lang', code);
+          App.onSettingChanged('settings.lang');
+        });
+      } }));
+    key(rows.push(row('Theme', '',
+      cycle('settings.theme', ['dark', 'light'], ['Dark', 'Light']))));
 
     rows.push(row('Start on', 'Which list the app opens with',
       cycle('settings.startGroup', ['all', 'fav', 'recent'],
@@ -60,8 +113,8 @@
     rows.push(row('Sort channels', 'Provider order, or by channel number',
       cycle('settings.sortBy', ['provider', 'number'], ['Provider order', 'Channel number'])));
 
-    rows.push({ kind: 'action', label: 'Channel numbers',
-      sub: 'Give any channel the number you want it on',
+    rows.push({ kind: 'action', label: T('Channel numbers'),
+      sub: T('Give any channel the number you want it on'),
       value: '', run: function () { App.openNumbers(); } });
 
     rows.push(row('Alternating row colours', 'Shade every other channel in the list',
@@ -69,6 +122,10 @@
 
     rows.push(row('Programme guide', 'Download and show now/next',
       toggle('settings.epg')));
+
+    rows.push(row('Guide panel', 'What the panel under the picture shows',
+      cycle('settings.guideView', ['centred', 'ahead'],
+            ['Now in the middle', 'Now at the top'])));
 
     rows.push(row('Catch-up history', 'How far back the guide lists finished programmes',
       cycle('settings.catchupHours', [6, 24, 48, 168],
@@ -80,6 +137,12 @@
 
     rows.push(row('Clock', '',
       cycle('settings.clock24', [true, false], ['24-hour', '12-hour'])));
+    /* The value is today, written the way this setting would write it. A
+       list of specimens dated 2026 would be six strings for nine dictionaries
+       to translate, and would still not show what the viewer is choosing. */
+    rows.push({ kind: 'cycle', label: T('Date format'),
+      sub: T('How the date over the channel list is written'),
+      ctl: dateCycle() });
 
     rows.push(row('Resume last channel', 'Start the last channel in the panel on launch',
       toggle('settings.startupPlayLast')));
@@ -87,31 +150,31 @@
     rows.push(row('Info bar duration', '',
       cycle('settings.osdSeconds', [3, 5, 8, 0], ['3s', '5s', '8s', 'Always'])));
 
-    rows.push({ kind: 'cycle', label: 'Parental control',
-      sub: 'Hide adult channels behind a PIN',
+    rows.push({ kind: 'cycle', label: T('Parental control'),
+      sub: T('Hide adult channels behind a PIN'),
       ctl: {
         kind: 'cycle', path: 'settings.parental',
-        get: function () { return Store.settings().parental ? 'On' : 'Off'; },
+        get: function () { return Store.settings().parental ? T('On') : T('Off'); },
         step: function () {
           var st = Store.settings();
           if (st.parental) { Store.set('settings.parental', false); return; }
-          if (!st.pin) { askPin('Set a PIN code', 'Four digits', function (pin) {
-            if (!pin || pin.length < 4) { U.toast('A PIN must be four digits'); return; }
+          if (!st.pin) { askPin(T('Set a PIN code'), T('Four digits'), function (pin) {
+            if (!pin || pin.length < 4) { U.toast(T('A PIN must be four digits')); return; }
             Store.set('settings.pin', pin);
             Store.set('settings.parental', true);
-            U.toast('Parental control on');
+            U.toast(T('Parental control on'));
             build(); paint();
           }); return; }
           Store.set('settings.parental', true);
         }
       } });
 
-    rows.push({ kind: 'action', label: 'Change PIN code',
-      sub: Store.settings().pin ? 'Set' : 'Not set', value: '', run: function () {
-        askPin('New PIN code', 'Four digits', function (pin) {
-          if (!pin || pin.length < 4) { U.toast('A PIN must be four digits'); return; }
+    rows.push({ kind: 'action', label: T('Change PIN code'),
+      sub: Store.settings().pin ? T('Set') : T('Not set'), value: '', run: function () {
+        askPin(T('New PIN code'), T('Four digits'), function (pin) {
+          if (!pin || pin.length < 4) { U.toast(T('A PIN must be four digits')); return; }
           Store.set('settings.pin', pin);
-          U.toast('PIN changed');
+          U.toast(T('PIN changed'));
           build(); paint();
         });
       } });
@@ -122,15 +185,15 @@
     var actProfile = Store.activeProfile();
     if (actProfile) lockedCount = Store.lockedKeys(actProfile.id).length;
     if (lockedCount) {
-      rows.push({ kind: 'action', label: 'Locked channels',
-        sub: 'Locked from the channel panel — right arrow on a channel',
+      rows.push({ kind: 'action', label: T('Locked channels'),
+        sub: T('Locked from the channel panel — right arrow on a channel'),
         value: String(lockedCount), run: function () {
-          if (!Store.sessionUnlocked()) { U.toast('Unlock below first'); return; }
-          U.confirm('Take the lock off all ' + lockedCount + ' channels?', function (yes) {
+          if (!Store.sessionUnlocked()) { U.toast(T('Unlock below first')); return; }
+          U.confirm(T('Take the lock off all {n} channels?', { n: lockedCount }), function (yes) {
             if (!yes) return;
             var pid = Store.activeProfile().id;
             Store.lockedKeys(pid).forEach(function (k) { Store.setLocked(pid, k, false); });
-            U.toast('All locks removed');
+            U.toast(T('All locks removed'));
             Channels.reloadGroups();
             build(); paint();
           });
@@ -140,25 +203,25 @@
     /* Either kind of lock needs a way through it, and the way is the same. */
     var somethingLocked = Store.parentalActive() || (Store.lockActive() && lockedCount > 0);
     if (somethingLocked && !Store.sessionUnlocked()) {
-      rows.push({ kind: 'action', label: 'Unlock locked channels',
-        sub: 'Until the app is closed', value: '', run: function () {
-          askPin('Enter PIN', '', function (pin) {
+      rows.push({ kind: 'action', label: T('Unlock locked channels'),
+        sub: T('Until the app is closed'), value: '', run: function () {
+          askPin(T('Enter PIN'), '', function (pin) {
             if (Store.unlock(pin)) {
-              U.toast('Unlocked');
+              U.toast(T('Unlocked'));
               Channels.reloadGroups();
               build(); paint();
-            } else U.toast('Wrong PIN');
+            } else U.toast(T('Wrong PIN'));
           });
         } });
     }
     /* Without this, putting a channel back behind the PIN means restarting the
        app — the session unlock is the only thing holding it open. */
     if (somethingLocked && Store.sessionUnlocked()) {
-      rows.push({ kind: 'action', label: 'Lock now',
-        sub: 'Put the locked channels back behind the PIN', value: '',
+      rows.push({ kind: 'action', label: T('Lock now'),
+        sub: T('Put the locked channels back behind the PIN'), value: '',
         run: function () {
           Store.relock();
-          U.toast('Locked');
+          U.toast(T('Locked'));
           Channels.reloadGroups();
           build(); paint();
         } });
@@ -166,18 +229,25 @@
 
     /* ---- Advanced ---- */
 
-    rows.push({ kind: 'action', label: 'Advanced',
-      sub: 'Diagnostics, streaming and the things that undo things',
-      value: advOpen ? 'Hide' : 'Show',
+    rows.push({ kind: 'action', label: T('Advanced'),
+      sub: T('Diagnostics, streaming and the things that undo things'),
+      value: advOpen ? T('Hide') : T('Show'),
       run: function () { advOpen = !advOpen; build(); paint(); } });
 
     if (advOpen) buildAdvanced(p);
 
-    rows.push({ kind: 'info', label: 'AquaPlay IPTV', sub: U.isTizen ? 'Running on Tizen' : 'Running in a browser',
-      value: 'v0.7.21' });
+    rows.push({ kind: 'info', label: 'AquaPlay IPTV',
+      sub: U.isTizen ? T('Running on Tizen')
+         : (U.isAndroid ? T('Running on Android TV') : T('Running in a browser')),
+      value: 'v0.7.35' });
   }
 
   function adv(r) { r.adv = true; rows.push(r); return r; }
+
+  /* rows.push returns the new length, so this marks the row that was just
+     added — which reads better at the call site than pushing and then
+     reaching back into the array for it. */
+  function key(len) { rows[len - 1].key = true; return rows[len - 1]; }
 
   function buildAdvanced(p) {
     /* What the picture is doing, in the words the player uses. None of it can
@@ -185,21 +255,21 @@
        sitting in front of the TV can read it out. */
     var d = Player.diag ? Player.diag() : null;
     if (d) {
-      adv({ kind: 'info', label: 'Stream resolution',
-        sub: 'What this channel is sending', value: d.source });
-      adv({ kind: 'info', label: 'Screen',
-        sub: 'Window size, and how the 1920x1080 layout is scaled to it',
+      adv({ kind: 'info', label: T('Stream resolution'),
+        sub: T('What this channel is sending'), value: d.source });
+      adv({ kind: 'info', label: T('Screen'),
+        sub: T('Window size, and how the 1920x1080 layout is scaled to it'),
         value: d.window + ' · x' + d.scale });
-      adv({ kind: 'info', label: 'Video plane',
-        sub: 'Where the picture is drawn, in ' + (d.tizen ? 'AVPlay' : 'CSS') + ' pixels',
+      adv({ kind: 'info', label: T('Video plane'),
+        sub: T('Where the picture is drawn, in {kind} pixels', { kind: d.tizen ? 'AVPlay' : 'CSS' }),
         value: d.applied });
-      adv({ kind: 'info', label: 'Picture method',
-        sub: 'How it fills that rectangle', value: d.method });
-      adv({ kind: 'info', label: 'Player',
-        sub: d.tizen ? 'AVPlay state' : 'Browser video element',
+      adv({ kind: 'info', label: T('Picture method'),
+        sub: T('How it fills that rectangle'), value: d.method });
+      adv({ kind: 'info', label: T('Player'),
+        sub: d.tizen ? T('AVPlay state') : T('Browser video element'),
         value: (d.state || 'idle') + ' · ' + d.mode });
       if (d.error && d.error !== 'none') {
-        adv({ kind: 'info', label: 'Last player error', sub: d.error, value: '' });
+        adv({ kind: 'info', label: T('Last player error'), sub: d.error, value: '' });
       }
     }
 
@@ -211,19 +281,20 @@
     if (live && live.length && EPG.hasData()) {
       var cov = EPG.coverage(live);
       var bad = cov.ended + cov.empty + cov.unmatched;
-      adv({ kind: 'action', label: 'Guide coverage',
-        sub: bad ? (cov.ended + ' end earlier today, ' + cov.empty + ' matched but empty, ' +
-                    cov.unmatched + ' never matched' +
-                    (cov.capped ? ', ' + cov.capped + ' trimmed to fit' : ''))
-                 : 'Every channel the guide covers has something on air',
+      adv({ kind: 'action', label: T('Guide coverage'),
+        sub: bad ? T('{ended} end earlier today, {empty} matched but empty, {unmatched} never matched',
+                    { ended: cov.ended, empty: cov.empty, unmatched: cov.unmatched }) +
+                   (cov.capped ? T(', {n} trimmed to fit', { n: cov.capped }) : '')
+                 : T('Every channel the guide covers has something on air'),
         value: cov.live + ' / ' + live.length,
         run: function () {
-          if (!cov.worst.length) { U.toast('Every channel has a programme on air'); return; }
+          if (!cov.worst.length) { U.toast(T('Every channel has a programme on air')); return; }
           var lines = cov.worst.slice(0, 4).map(function (w) {
-            if (w.state === 'unmatched') return w.name + ': no guide channel matched';
-            if (w.state === 'empty') return w.name + ': matched "' + w.id + '", no programmes';
-            return w.name + ': guide ends ' + U.hhmm(new Date(w.last)) +
-                   ' (' + w.kept + ' kept' + (w.capped ? ', ' + w.capped + ' trimmed' : '') + ')';
+            if (w.state === 'unmatched') return w.name + ': ' + T('no guide channel matched');
+            if (w.state === 'empty') return w.name + ': ' + T('matched "{id}", no programmes', { id: w.id });
+            return w.name + ': ' + T('guide ends {time} ({kept} kept)',
+                     { time: U.hhmm(new Date(w.last)), kept: w.kept }) +
+                   (w.capped ? T(', {n} trimmed', { n: w.capped }) : '');
           });
           U.toast(lines.join('   ·   '), 9000);
         } });
@@ -244,7 +315,7 @@
       cycle('settings.epgOffset', [-3, -2, -1, 0, 1, 2, 3],
             ['-3 hours', '-2 hours', '-1 hour', 'None', '+1 hour', '+2 hours', '+3 hours'])));
 
-    if (!U.isTizen) {
+    if (!U.isTV) {
       adv(row('HLS engine', 'Desktop only; the TV always uses AVPlay',
         cycle('settings.hlsEngine', ['auto', 'hlsjs', 'native'],
               ['Auto', 'hls.js', 'Browser native'])));
@@ -252,37 +323,37 @@
 
     adv(row('Hide empty groups', '', toggle('settings.hideEmptyGroups')));
 
-    adv({ kind: 'action', label: 'Reset channel numbers',
-      sub: 'Undo every number you have changed', value: '', run: function () {
+    adv({ kind: 'action', label: T('Reset channel numbers'),
+      sub: T('Undo every number you have changed'), value: '', run: function () {
         var pr = Store.activeProfile();
         if (!pr) return;
-        U.confirm('Reset all channel numbers to the playlist values?', function (yes) {
+        U.confirm(T('Reset all channel numbers to the playlist values?'), function (yes) {
           if (!yes) return;
           Store.clearNumbers(pr.id);
-          U.toast('Channel numbers reset');
+          U.toast(T('Channel numbers reset'));
         });
       } });
 
-    adv({ kind: 'action', label: 'Restart application',
-      sub: 'Reload everything from scratch', value: '', run: function () {
-        U.confirm('Restart AquaPlay?', function (yes) { if (yes) App.restart(); });
+    adv({ kind: 'action', label: T('Restart application'),
+      sub: T('Reload everything from scratch'), value: '', run: function () {
+        U.confirm(T('Restart AquaPlay?'), function (yes) { if (yes) App.restart(); });
       } });
 
-    adv({ kind: 'action', label: 'Clear cached data',
-      sub: 'Forces a fresh download of channels and guide', value: '', run: function () {
+    adv({ kind: 'action', label: T('Clear cached data'),
+      sub: T('Forces a fresh download of channels and guide'), value: '', run: function () {
         var pr = Store.activeProfile();
         if (!pr) return;
         Cache.clearProfile(pr.id).then(function () {
-          U.toast('Cache cleared \u2014 reloading');
+          U.toast(T('Cache cleared — reloading'));
           App.refreshPlaylist();
         });
       } });
 
-    adv({ kind: 'action', label: 'Remove playlist', sub: 'Deletes it from this TV', value: '',
+    adv({ kind: 'action', label: T('Remove playlist'), sub: T('Deletes it from this TV'), value: '',
       danger: true, run: function () {
         var pr = Store.activeProfile();
         if (!pr) return;
-        U.confirm('Remove "' + pr.name + '" from this TV?', function (yes) {
+        U.confirm(T('Remove "{name}" from this TV?', { name: pr.name }), function (yes) {
           if (!yes) return;
           Cache.clearProfile(pr.id);
           Store.removeProfile(pr.id);
@@ -320,7 +391,9 @@
   }
 
   function row(label, sub, ctl) {
-    return { kind: 'cycle', label: label, sub: sub, ctl: ctl };
+    /* Translated here rather than at each call site: every row goes through
+       this, and the English text is the key. */
+    return { kind: "cycle", label: T(label), sub: sub ? T(sub) : "", ctl: ctl };
   }
 
   function paint() {
@@ -329,7 +402,7 @@
       var r = rows[i];
       var value = r.kind === 'cycle' ? r.ctl.get() : (r.value || '');
       html += '<div class="set-row' + (i === idx ? ' focused' : '') +
-                (r.adv ? ' adv' : '') + '">' +
+                (r.adv ? ' adv' : '') + (r.key ? ' key' : '') + '">' +
                 '<span class="set-value">' + U.esc(value) + '</span>' +
                 '<span class="set-label">' + U.esc(r.label) +
                   (r.sub ? '<span class="set-sub">' + U.esc(r.sub) + '</span>' : '') +
@@ -364,6 +437,9 @@
     }, false);
   }
 
+  /* The rows are built with their text already translated, so a language
+     change has to build them again. */
+  S.rebuild = function () { build(); paint(); };
   S.show = function () {
     bindMouse();
     idx = 0; build(); paint();
@@ -391,7 +467,7 @@
         App.closeSettings();
         return;
       case 'exit':
-        U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); });
+        U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
         return;
     }
   };

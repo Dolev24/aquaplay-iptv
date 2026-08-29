@@ -30,12 +30,12 @@
     profile = p;
     item = row;
     busy = true;
-    U.loader(true, 'Loading ' + (row.name || 'series') + '…');
+    U.loader(true, T('Loading {name}…', { name: row.name || T('series') }));
 
     Xtream.seriesInfo(p, row.seriesId).then(function (d) {
       busy = false;
       U.loader(false);
-      if (!d.seasons.length) { U.toast('No episodes listed for this series'); return; }
+      if (!d.seasons.length) { U.toast(T('No episodes listed for this series')); return; }
       seasons = d.seasons;
       seasonIdx = 0; epIdx = 0; pane = 'episodes'; playing = false;
       paintHead(d.info);
@@ -45,7 +45,7 @@
     }).catch(function (err) {
       busy = false;
       U.loader(false);
-      U.toast(err && err.message ? err.message : 'Could not load that series');
+      U.toast(err && err.message ? err.message : T('Could not load that series'));
     });
   };
 
@@ -245,7 +245,7 @@
 
   S.onPlayerEvent = function (type, arg) {
     if (!playing) return;
-    if (type === 'error') U.toast(arg || 'Playback failed');
+    if (type === 'error') U.toast(arg || T('Playback failed'));
   };
 
   S.isPlaying = function () { return playing; };

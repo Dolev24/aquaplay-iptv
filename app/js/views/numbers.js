@@ -31,7 +31,9 @@
     for (var i = 0; i < channels.length; i++) {
       var c = channels[i];
       var custom = Store.channelNumber(profile.id, c.key);
-      rows.push({ ch: c, num: custom || c.num || (i + 1), custom: !!custom });
+      /* Not a change if it agrees with the playlist, whatever is stored. */
+      rows.push({ ch: c, num: custom || c.num || (i + 1),
+                  custom: !!custom && custom !== c.num });
     }
     idx = 0; top = 0;
     build();
@@ -109,14 +111,15 @@
     var mine = r.num;
     var current = Store.channelNumber(profile.id, c.key);
     var sub = current
-      ? 'Now ' + current + ', playlist says ' + (c.num || '—') + '. Type a new number.'
-      : 'Now ' + (c.num || '—') + ', from the playlist. Type a new number.';
+      ? T('Now {n}, playlist says {orig}. Type a new number.',
+          { n: current, orig: c.num || '—' })
+      : T('Now {n}, from the playlist. Type a new number.', { n: c.num || '—' });
 
     U.numberPrompt(c.name, sub, function (n) {
       if (n === null) return;
       if (n === 0) {
         Store.setChannelNumber(profile.id, c.key, 0);
-        U.toast('Number reset to ' + (c.num || '—'));
+        U.toast(T('Number reset to {n}', { n: c.num || '—' }));
         refresh();
         return;
       }
@@ -127,19 +130,19 @@
          keeps every number reachable — trading places. */
       var other = rowWithNumber(n, c.key);
       if (other) {
-        U.confirm('Channel ' + n + ' is ' + other.ch.name + '. Swap their numbers?',
+        U.confirm(T('Channel {n} is {name}. Swap their numbers?', { n: n, name: other.ch.name }),
           function (yes) {
             if (!yes) return;
             Store.setChannelNumber(profile.id, other.ch.key, mine);
             Store.setChannelNumber(profile.id, c.key, n);
-            U.toast('Swapped with ' + other.ch.name + ' — it is now ' + mine);
+            U.toast(T('Swapped with {name} — it is now {n}', { name: other.ch.name, n: mine }));
             refresh();
           });
         return;
       }
 
-      Store.setChannelNumber(profile.id, c.key, n);
-      U.toast('Set to ' + n);
+      Store.setChannelNumber(profile.id, c.key, n, c.num);
+      U.toast(T('Set to {n}', { n: n }));
       refresh();
     });
   }
@@ -148,14 +151,14 @@
     var r = rows[idx];
     if (!r || !r.custom) return;
     Store.setChannelNumber(profile.id, r.ch.key, 0);
-    U.toast('Number reset to ' + (r.ch.num || '—'));
+    U.toast(T('Number reset to {n}', { n: r.ch.num || '—' }));
     refresh();
   }
 
   function refresh() {
     for (var i = 0; i < rows.length; i++) {
       var custom = Store.channelNumber(profile.id, rows[i].ch.key);
-      rows[i].custom = !!custom;
+      rows[i].custom = !!custom && custom !== rows[i].ch.num;
       rows[i].num = custom || rows[i].ch.num || (i + 1);
     }
     for (var p = 0; p < pool.length; p++) pool[p]._idx = -1;

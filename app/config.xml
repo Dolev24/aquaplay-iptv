@@ -2,7 +2,7 @@
 <widget xmlns="http://www.w3.org/ns/widgets"
         xmlns:tizen="http://tizen.org/ns/widgets"
         id="http://aquaplay.iptv/aquaplay"
-        version="0.7.21"
+        version="0.7.35"
         viewmodes="maximized">
 
   <!-- The package id is the 10-character prefix: 10 alphanumeric characters

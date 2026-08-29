@@ -350,7 +350,7 @@
 
     return new Promise(function (resolve, reject) {
       if (!text || text.indexOf('<programme') === -1) {
-        reject(new Error('That URL did not return an XMLTV guide.'));
+        reject(new Error(T('That URL did not return an XMLTV guide.')));
         return;
       }
 
@@ -387,7 +387,7 @@
     return {
       feed: function (text) { sc.feed(text); },
       finish: function () {
-        if (!sc.sawProgramme()) throw new Error('That URL did not return an XMLTV guide.');
+        if (!sc.sawProgramme()) throw new Error(T('That URL did not return an XMLTV guide.'));
         return sc.finish();
       }
     };

@@ -31,7 +31,7 @@
       if (!text || text.indexOf('#EXTM3U') === -1) {
         // Some providers omit the header; only bail if there are no #EXTINF at all.
         if (!text || text.indexOf('#EXTINF') === -1) {
-          reject(new Error('That URL did not return an M3U playlist.'));
+          reject(new Error(T('That URL did not return an M3U playlist.')));
           return;
         }
       }

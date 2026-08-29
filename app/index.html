@@ -20,52 +20,52 @@
   <section id="view-setup" class="view">
     <div class="setup-wrap">
       <div class="brand"><span class="brand-mark"></span>AquaPlay</div>
-      <h1 id="setup-title">Add your playlist</h1>
-      <p class="setup-sub">Enter the details your IPTV provider gave you.</p>
+      <h1 id="setup-title" data-i18n="Add your playlist">Add your playlist</h1>
+      <p class="setup-sub" data-i18n="Enter the details your IPTV provider gave you.">Enter the details your IPTV provider gave you.</p>
 
       <div class="tabs" id="setup-tabs">
-        <div class="tab focusable" data-tab="xtream">Xtream Codes</div>
-        <div class="tab focusable" data-tab="m3u">M3U URL</div>
+        <div class="tab focusable" data-tab="xtream" data-i18n="Xtream Codes">Xtream Codes</div>
+        <div class="tab focusable" data-tab="m3u" data-i18n="M3U URL">M3U URL</div>
       </div>
 
       <form id="setup-form" onsubmit="return false;">
         <div class="fields" id="fields-xtream">
           <label class="field">
-            <span>Playlist name</span>
-            <input class="focusable" type="text" id="x-name" placeholder="My provider" autocomplete="off">
+            <span data-i18n="Playlist name">Playlist name</span>
+            <input class="focusable" type="text" id="x-name" autocomplete="off">
           </label>
           <label class="field">
-            <span>Server URL</span>
+            <span data-i18n="Server URL">Server URL</span>
             <input class="focusable" type="url" id="x-host" placeholder="http://example.com:8080" autocomplete="off">
           </label>
           <label class="field">
-            <span>Username</span>
+            <span data-i18n="Username">Username</span>
             <input class="focusable" type="text" id="x-user" autocomplete="off">
           </label>
           <label class="field">
-            <span>Password</span>
+            <span data-i18n="Password">Password</span>
             <input class="focusable" type="password" id="x-pass" autocomplete="off">
           </label>
         </div>
 
         <div class="fields hidden" id="fields-m3u">
           <label class="field">
-            <span>Playlist name</span>
-            <input class="focusable" type="text" id="m-name" placeholder="My playlist" autocomplete="off">
+            <span data-i18n="Playlist name">Playlist name</span>
+            <input class="focusable" type="text" id="m-name" autocomplete="off">
           </label>
           <label class="field">
-            <span>M3U / M3U8 URL</span>
+            <span data-i18n="M3U / M3U8 URL">M3U / M3U8 URL</span>
             <input class="focusable" type="url" id="m-url" placeholder="http://example.com/get.php?..." autocomplete="off">
           </label>
           <label class="field">
-            <span>EPG (XMLTV) URL <em>optional</em></span>
+            <span><span data-i18n="EPG (XMLTV) URL">EPG (XMLTV) URL</span> <em data-i18n="optional">optional</em></span>
             <input class="focusable" type="url" id="m-epg" placeholder="http://example.com/xmltv.php?..." autocomplete="off">
           </label>
         </div>
 
         <div class="setup-actions">
-          <button type="button" class="btn primary focusable" id="setup-connect">Connect</button>
-          <button type="button" class="btn focusable hidden" id="setup-cancel">Cancel</button>
+          <button type="button" class="btn primary focusable" id="setup-connect" data-i18n="Connect">Connect</button>
+          <button type="button" class="btn focusable hidden" id="setup-cancel" data-i18n="Cancel">Cancel</button>
         </div>
         <div class="setup-msg" id="setup-msg"></div>
       </form>
@@ -75,20 +75,29 @@
   <!-- ---------------- MAIN BROWSE ---------------- -->
   <section id="view-main" class="view hidden">
     <aside id="groups">
-      <div class="pane-head">
-        <span class="pane-title" id="playlist-name">Playlist</span>
+      <!-- The wordmark rather than the playlist's name. The name is the one
+           thing on this screen the viewer already knows — they typed it — and
+           the rail head is the most looked-at corner of the app. The name is
+           still in the drawer's foot, where it answers "which playlist is
+           this" for somebody who has more than one. -->
+      <div class="pane-head brand-head">
+        <span class="brand-logo" id="rail-logo"></span>
+        <span class="pane-title hidden" id="playlist-name">Playlist</span>
       </div>
       <div class="sections hidden" id="sections">
-        <div class="sec" data-sec="live">Live</div>
-        <div class="sec" data-sec="vod">Movies</div>
-        <div class="sec" data-sec="series">Series</div>
+        <div class="sec" data-sec="live" data-i18n="Live">Live</div>
+        <div class="sec" data-sec="vod" data-i18n="Movies">Movies</div>
+        <div class="sec" data-sec="series" data-i18n="Series">Series</div>
       </div>
       <div class="scroller" id="group-scroller"><div id="group-list"></div></div>
       <!-- The last stop down the rail, and what left opens from anywhere in
-           it. The arrow and the dots are drawn, not typed: a glyph is at the
-           mercy of whatever font the TV falls back to. -->
-      <div class="rail-hint" id="rail-search"><span class="mag rail-mag"></span>Search</div>
-      <div class="rail-hint" id="rail-settings"><i class="hint-arrow"></i><span class="dots"></span>Settings</div>
+           it. The arrow, the magnifier and the sliders are drawn, not typed:
+           a glyph is at the mercy of whatever font the TV falls back to. -->
+      <!-- Search used to sit here as well. It is on the green button, in the
+           drawer, and reachable from anywhere; a third way in cost a row at
+           the foot of every screen and one more stop for the cursor to pass
+           through on its way to Settings. -->
+      <div class="rail-hint" id="rail-settings"><i class="hint-arrow"></i><span class="sliders"></span><span data-i18n="Settings">Settings</span></div>
     </aside>
 
     <main id="channels">
@@ -97,23 +106,28 @@
       <div class="pane-head">
         <div class="search-box hidden" id="search-box">
           <span class="mag"></span>
-          <input class="focusable" id="search-input" type="text" placeholder="Search channels" autocomplete="off">
+          <input class="focusable" id="search-input" type="text" data-i18n-ph="Search channels" placeholder="Search channels" autocomplete="off">
         </div>
-        <span class="pane-title" id="list-title">All channels</span>
+        <!-- The clock leads, because a television is also what people look
+             at to find out the time, and the list is named under it. -->
+        <span class="head-clock" id="head-clock"></span>
+        <span class="head-date" id="head-date"></span>
+        <span class="pane-title under" id="list-title" data-i18n="All channels">All channels</span>
         <span class="count" id="channel-count"></span>
       </div>
       <div class="scroller" id="channel-scroller">
         <div id="channel-spacer"><div id="channel-list"></div></div>
       </div>
-      <div class="empty hidden" id="channel-empty">No channels here</div>
+      <div class="empty hidden" id="channel-empty" data-i18n="No channels here">No channels here</div>
       <!-- A legend for the remote, and nothing else: the PC keys that stand in
            for these while testing are listed by H instead of crowding the bar. -->
       <div class="action-bar">
-        <span class="act" data-act="play"><i class="k k-ok">OK</i>Play</span>
-        <span class="act" data-act="full"><i class="k k-play"></i>Full screen</span>
-        <span class="act" data-act="fav"><i class="k k-red"></i>Favourite</span>
-        <span class="act" data-act="search"><i class="k k-green"></i>Search</span>
-        <span class="act" data-act="settings"><i class="k k-yellow"></i>Settings</span>
+        <span class="act" data-act="play"><i class="k k-ok">OK</i><span data-i18n="Play">Play</span></span>
+        <span class="act" data-act="full"><i class="k k-play"></i><span data-i18n="Full screen">Full screen</span></span>
+        <span class="act" data-act="info"><i class="k k-info">INFO</i><span data-i18n="Schedule">Schedule</span></span>
+        <span class="act" data-act="fav"><i class="k k-red"></i><span data-i18n="Favourite">Favourite</span></span>
+        <span class="act" data-act="search"><i class="k k-green"></i><span data-i18n="Search">Search</span></span>
+        <span class="act" data-act="settings"><i class="k k-yellow"></i><span data-i18n="Settings">Settings</span></span>
       </div>
     </main>
 
@@ -124,7 +138,7 @@
       <div class="preview-frame" id="preview-frame">
         <div class="preview-placeholder" id="preview-placeholder">
           <span class="spinner hidden" id="preview-spinner"></span>
-          <span id="preview-hint">Press OK to play</span>
+          <span id="preview-hint" data-i18n="Press OK to play">Press OK to play</span>
         </div>
       </div>
 
@@ -139,11 +153,11 @@
 
         <div class="epg-panel" id="epg-panel">
           <div class="epg-head">
-            <span class="epg-label">Guide</span>
+            <span class="epg-label" data-i18n="Guide">Guide</span>
             <span class="epg-day" id="epg-day"></span>
           </div>
           <div class="epg-scroller" id="epg-scroller"><div id="epg-list"></div><i class="epg-track"><b id="epg-thumb"></b></i></div>
-          <div class="epg-empty hidden" id="epg-empty">No guide for this channel</div>
+          <div class="epg-empty hidden" id="epg-empty" data-i18n="No guide for this channel">No guide for this channel</div>
         </div>
       </div>
     </aside>
@@ -162,7 +176,7 @@
 
   <div id="sidemenu" class="hidden">
     <div class="sm-panel">
-      <div class="sm-brand"><span class="brand-mark"></span>AquaPlay</div>
+      <div class="sm-brand"><span class="brand-logo sm-logo"></span></div>
       <div id="sm-list"></div>
       <div class="sm-foot" id="sm-foot"></div>
     </div>
@@ -171,8 +185,8 @@
   <!-- ---------------- CHANNEL NUMBERS ---------------- -->
   <section id="view-numbers" class="view hidden">
     <div class="nm-head">
-      <div class="nm-title">Channel numbers</div>
-      <div class="nm-sub">OK to set a number, <b class="k k-red"></b> to put it back</div>
+      <div class="nm-title" data-i18n="Channel numbers">Channel numbers</div>
+      <div class="nm-sub"><span data-i18n="OK to set a number,">OK to set a number,</span> <b class="k k-red"></b> <span data-i18n="to put it back">to put it back</span></div>
       <div class="nm-count" id="nm-count"></div>
     </div>
     <div class="nm-scroller" id="nm-scroller"><div id="nm-list"></div></div>
@@ -185,7 +199,7 @@
         <span class="pane-title" id="rp-channel">Channel</span>
       </div>
       <div class="rp-days-box"><div id="rp-days"></div></div>
-      <div class="rail-hint"><b>&#9664;</b> Back</div>
+      <div class="rail-hint"><b>&#9664;</b> <span data-i18n="Back">Back</span></div>
     </aside>
     <main class="rp-right">
       <div class="pane-head">
@@ -193,7 +207,29 @@
         <span class="count" id="rp-count"></span>
       </div>
       <div class="rp-scroller" id="rp-scroller"><div id="rp-list"></div></div>
-      <div class="rp-empty hidden" id="rp-empty">Nothing recorded for this day</div>
+      <div class="rp-empty hidden" id="rp-empty" data-i18n="Nothing recorded for this day">Nothing recorded for this day</div>
+    </main>
+  </section>
+
+  <!-- ---------------- TV CATALOGUE ---------------- -->
+  <!-- Times down the left, everything on at that time down the right. The
+       guide panel is about one channel; this is about the evening. -->
+  <section id="view-catalog" class="view hidden">
+    <aside class="cg-left">
+      <div class="pane-head">
+        <span class="pane-title" data-i18n="TV catalogue">TV catalogue</span>
+        <span class="count" id="cg-chan-count"></span>
+      </div>
+      <div class="cg-chans-box" id="cg-chans-box"><div id="cg-chans"></div></div>
+      <div class="rail-hint"><b>&#9664;</b> <span data-i18n="Back">Back</span></div>
+    </aside>
+    <main class="cg-right">
+      <div class="pane-head">
+        <span class="rp-title" id="cg-title"></span>
+        <span class="count" id="cg-count"></span>
+      </div>
+      <div class="cg-scroller" id="cg-scroller"><div id="cg-progs"></div></div>
+      <div class="rp-empty hidden" id="cg-empty" data-i18n="No guide for this channel">No guide for this channel</div>
     </main>
   </section>
 
@@ -201,7 +237,7 @@
   <section id="view-series" class="view hidden">
     <aside class="sr-left">
       <div class="sr-poster" id="sr-poster"></div>
-      <div class="rail-hint"><b>&#9664;</b> Back</div>
+      <div class="rail-hint"><b>&#9664;</b> <span data-i18n="Back">Back</span></div>
     </aside>
     <main class="sr-right">
       <div class="sr-head">
@@ -211,7 +247,7 @@
       </div>
       <div class="sr-seasons" id="sr-seasons"></div>
       <div class="sr-ep-scroller" id="sr-ep-scroller"><div id="sr-episodes"></div></div>
-      <div class="sr-empty hidden" id="sr-empty">No episodes</div>
+      <div class="sr-empty hidden" id="sr-empty" data-i18n="No episodes">No episodes</div>
     </main>
   </section>
 
@@ -224,7 +260,7 @@
   <!-- Non-blocking health warning: shown over the video, never over the
        picture's centre, and it never pauses or restarts anything. -->
   <div id="stall-warn" class="hidden">
-    <i class="stall-dot"></i><span id="stall-text"></span><b id="stall-hint">OK for live</b>
+    <i class="stall-dot"></i><span id="stall-text"></span><b id="stall-hint" data-i18n="OK for live">OK for live</b>
   </div>
 
   <!-- The broadcast time being watched, kept on screen while wound back even
@@ -244,12 +280,13 @@
         <span class="seek-day" id="seek-day"></span>
       </div>
       <div class="seek-line"><i id="seek-fill"></i><b id="seek-knob"></b></div>
-      <div class="seek-scale"><span id="seek-lo"></span><span>Live</span></div>
+      <div class="seek-scale"><span id="seek-lo"></span><span data-i18n="Live">Live</span></div>
     </div>
     <div class="osd-row">
       <div class="osd-logo" id="osd-logo"></div>
       <div class="osd-text">
         <div class="osd-num" id="osd-num"></div>
+        <b class="osd-back hidden" id="osd-back" data-i18n="Back to live">Back to live</b>
         <div class="osd-name" id="osd-name"></div>
         <div class="osd-now" id="osd-now"><span class="osd-left" id="osd-left"></span></div>
         <div class="osd-bar"><i id="osd-bar-fill"></i></div>
@@ -264,17 +301,23 @@
 
   <!-- ---------------- SETTINGS ---------------- -->
   <section id="view-settings" class="view hidden">
+    <!-- Top left, the same wordmark the rail head shows, so the two screens
+         are recognisably one app. -->
+    <span class="brand-logo set-brand"></span>
     <div class="settings-wrap">
-      <h1>Settings</h1>
+      <h1 data-i18n="Settings">Settings</h1>
       <div id="settings-list"></div>
     </div>
+    <!-- And a large one in the space to the right of the rows, which was empty
+         and is the only place on the screen with room for it. -->
+    <span class="brand-logo set-brand-big"></span>
   </section>
 
   <!-- ---------------- OVERLAYS ---------------- -->
   <div id="loader" class="hidden">
     <div class="loader-box">
       <span class="spinner"></span>
-      <div id="loader-text">Loading</div>
+      <div id="loader-text" data-i18n="Loading">Loading</div>
       <div class="progress hidden" id="loader-progress"><i id="loader-progress-fill"></i></div>
     </div>
   </div>
@@ -284,37 +327,60 @@
   <!-- Keyboard reference. Desktop-only: on a TV the remote has these buttons. -->
   <div id="keyhelp" class="hidden">
     <div class="keyhelp-box">
-      <div class="kh-title">Remote buttons on a keyboard</div>
+      <div class="kh-title" data-i18n="Remote buttons on a keyboard">Remote buttons on a keyboard</div>
       <div class="kh-grid" id="kh-grid"></div>
-      <div class="kh-foot">Press any key to close</div>
+      <div class="kh-foot" data-i18n="Press any key to close">Press any key to close</div>
     </div>
   </div>
 
   <div id="number" class="hidden">
     <div class="number-box">
-      <div class="num-title" id="num-title">Channel number</div>
+      <div class="num-title" id="num-title" data-i18n="Channel number">Channel number</div>
       <div class="num-value" id="num-value">—</div>
       <div class="num-sub" id="num-sub"></div>
       <div class="num-keys">
-        <span><i class="k k-ok">OK</i>Save</span>
-        <span><i class="k k-red"></i>Clear</span>
-        <span><i class="k k-back">BACK</i>Delete</span>
+        <span><i class="k k-ok">OK</i><span data-i18n="Save">Save</span></span>
+        <span><i class="k k-red"></i><span data-i18n="Clear">Clear</span></span>
+        <span><i class="k k-back">BACK</i><span data-i18n="Delete">Delete</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- A list to choose from, for settings with more answers than anybody
+       wants to press their way through. Ten languages cycled one key at a
+       time is nine presses to get back to where you were if you overshoot,
+       in a language you may no longer be able to read. -->
+  <div id="picker" class="hidden">
+    <div class="picker-box">
+      <div class="picker-title" id="picker-title"></div>
+      <div class="picker-scroll" id="picker-scroll"><div id="picker-list"></div></div>
+      <div class="picker-foot">
+        <span><i class="k k-ok">OK</i><span data-i18n="Choose">Choose</span></span>
+        <span><i class="k k-back">BACK</i><span data-i18n="Cancel">Cancel</span></span>
       </div>
     </div>
   </div>
 
   <div id="confirm" class="hidden">
     <div class="confirm-box">
-      <div id="confirm-text"></div>
+      <div class="confirm-head">
+        <div class="confirm-logo hidden" id="confirm-logo"></div>
+        <div class="confirm-body">
+          <div id="confirm-text"></div>
+          <div class="confirm-desc hidden" id="confirm-desc"></div>
+        </div>
+      </div>
       <div class="confirm-actions">
-        <button class="btn focusable" id="confirm-no">No</button>
-        <button class="btn primary focusable" id="confirm-yes">Yes</button>
+        <button class="btn focusable" id="confirm-no" data-i18n="No">No</button>
+        <button class="btn primary focusable" id="confirm-yes" data-i18n="Yes">Yes</button>
       </div>
     </div>
   </div>
 
 </div>
 
+<script src="js/i18n.js"></script>
+<script src="js/lang.js"></script>
 <script src="js/util.js"></script>
 <script src="js/store.js"></script>
 <script src="js/cache.js"></script>
@@ -329,6 +395,7 @@
 <script src="js/views/setup.js"></script>
 <script src="js/views/channels.js"></script>
 <script src="js/views/replay.js"></script>
+<script src="js/views/catalog.js"></script>
 <script src="js/views/series.js"></script>
 <script src="js/views/numbers.js"></script>
 <script src="js/views/settings.js"></script>

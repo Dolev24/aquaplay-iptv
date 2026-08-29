@@ -19,12 +19,17 @@
   var searchTerm = '';
   var byKey     = {};
 
-  var ROW_H = 76, GROW_H = 64, GUIDE_H = 60;   // GUIDE_H matches .epg-row in CSS
+  /* ROW_H matches --row-h in the CSS, GUIDE_H matches .epg-row: both are
+     counted in rows by the windowing, and nothing checks that they agree. */
+  var ROW_H = 92, GROW_H = 64, GUIDE_H = 60;
   var altRows = false;                         // read from settings on show()
   /* -1 nowhere, 0 Search, 1 Settings: the two fixed rows at the foot of the
      rail, below every group. */
   var railFoot = -1;
-  var RAIL_FEET = ['rail-search', 'rail-settings'];
+  /* One row now. Search was the other, and it was the third way to the same
+     place — the green button and the drawer both open it — bought at the cost
+     of a stop the cursor had to pass through every time it went to Settings. */
+  var RAIL_FEET = ['rail-settings'];
   var chList = null, grList = null;
 
   var guide = [];          // programmes shown in the guide panel
@@ -41,6 +46,10 @@
   var SEEK_STEP = 30000;      // arrow keys
   var SEEK_JUMP = 300000;     // rewind / fast-forward keys
   var LIVE_EDGE = 20000;      // close enough to now to count as live
+  /* Both places that refuse a rewind refuse it for the same reason, and it is
+     not a fault in the app: the provider does not keep this channel. Saying so
+     is the difference between "it is broken" and "it does not do that". */
+  var NO_CATCHUP = 'This channel cannot be rewound — it has no catch-up';
 
   var osdTimer = null, clockTimer = null, epgTimer = null, tsTimer = null;
 
@@ -51,6 +60,7 @@
   var buffering = false, bufferTimer = null;
   var DRIFT_WARN = 5000;      // worth saying once it is seconds, not frames
   var stallFocus = false;      // the "stream is behind" badge has the cursor
+  var liveFocus = false;       // the info bar's "Back to live" has the cursor
   var reconnects = 0, reconnectTimer = null;
   var MAX_RECONNECT = 3, RECONNECT_WAIT = 3000;
   var BUFFER_WARN = 1500;     // a brief rebuffer is normal, not a badge
@@ -191,7 +201,7 @@
 
     groupIdx = startIdx || 0; chIdx = 0; searchTerm = '';
     U.$('search-input').value = '';
-    U.$('search-input').placeholder = SEARCH_LABEL[kind] || 'Search';
+    U.$('search-input').placeholder = T(SEARCH_LABEL[kind] || 'Search');
 
     // The groups array itself has been replaced, so every pooled row must be
     // rewritten — a recycled node at the same index would keep the old text.
@@ -299,11 +309,11 @@
         case 'full':     watchFullscreen(); return;
         case 'fav':      toggleFav(); return;
         case 'search':   enterSearch(); return;
+        case 'info':     enterGuide(); return;
         case 'settings': App.openSettings(); return;
       }
     }, false);
 
-    U.$('rail-search').addEventListener('click', function () { enterSearch(); }, false);
     U.$('rail-settings').addEventListener('click', function () { App.openSettings(); }, false);
 
     U.$('stall-warn').addEventListener('click', function () {
@@ -383,7 +393,11 @@
 
   C.show = function () {
     C.applyRowStyle();
+    paintClock();
     U.$('view-main').classList.remove('hidden');
+    /* Back to the browse screen: the picture comes back with it. The CSS
+       still decides whether there is one to show. */
+    U.$('video-layer').classList.remove('hidden');
     paintStall();
     U.$('view-setup').classList.add('hidden');
     U.$('view-settings').classList.add('hidden');
@@ -403,16 +417,34 @@
     U.$('ctxmenu').classList.add('hidden');
     if (pane === 'ctx') pane = 'channels';
     U.$('view-main').classList.add('hidden');
-    // The badge and the stream warning live outside .view, so they do not hide
-    // with the pane and have to be told.
+    // The badge, the stream warning and the video all live outside .view, so
+    // they do not hide with the pane and have to be told.
     U.$('preview-badge').classList.add('hidden');
+    /* In a browser the video is a real element above the panes, so without
+       this it floats over settings and the catch-up browser. On a TV the
+       picture is behind the page and those screens paint their own opaque
+       background over it, so this changes nothing there — and either way it
+       only hides the picture. Whatever is playing keeps playing. */
+    U.$('video-layer').classList.add('hidden');
     hideStall();
   };
 
   C.channels = function () { return all; };
+  /* The number a channel is dialled by, for anything outside this file that
+     has to print one — the catalogue does. Its own override beats the
+     playlist's, which is the same rule the list itself paints by. */
+  C.numberOf = function (c) { return numOf(c) || 0; };
   C.playingKey = function () { return playingKey; };
   /* Rebuild the rail as well as the list — a parental unlock changes which
      groups exist, not just which channels are in them. */
+  /* The panel windows its programmes at paint time and only repaints when
+     the channel changes, so changing what it should show has to say so. */
+  C.refreshGuide = function () { paintGuide(true); };
+  /* The clock and the date are painted on a timer, so a setting that changes
+     how they read has to say so or it looks like nothing happened for ten
+     seconds. */
+  C.refreshClock = function () { paintClock(); };
+
   C.reloadGroups = function () {
     /* applyGroup drops the cursor at the top, which is right when the list has
        genuinely changed and gratuitous when it has not — locking a channel
@@ -458,13 +490,13 @@
        otherwise close the dialog and leave the viewer pressing OK again to get
        it back. It asks again instead, saying why. */
     var ask = function (sub) {
-      askPin('Enter PIN', sub, function (pin) {
-        if (!Store.unlock(pin)) { ask('Wrong PIN — try again'); return; }
+      askPin(T('Enter PIN'), sub, function (pin) {
+        if (!Store.unlock(pin)) { ask(T('Wrong PIN — try again')); return; }
         repaintAll();
         run();
       });
     };
-    ask(c.name + ' is locked');
+    ask(T('{name} is locked', { name: c.name }));
   }
 
   /* A PIN is typed in front of whoever it is meant to keep out, so it is
@@ -493,8 +525,8 @@
     var locked = Store.isLocked(profile.id, c.key);
 
     if (!Store.settings().pin) {
-      askPin('Set a PIN code', 'Four digits. There is no way past it later.', function (pin) {
-        if (!pin || pin.length < 4) { U.toast('A PIN must be four digits'); return; }
+      askPin(T('Set a PIN code'), T('Four digits. There is no way past it later.'), function (pin) {
+        if (!pin || pin.length < 4) { U.toast(T('A PIN must be four digits')); return; }
         Store.set('settings.pin', pin);
         applyLock(c, true);
       });
@@ -504,12 +536,13 @@
     if (!locked && Store.sessionUnlocked()) { applyLock(c, true); return; }
 
     var ask = function (sub) {
-      askPin('Enter PIN', sub, function (pin) {
-        if (!Store.checkPin(pin)) { ask('Wrong PIN — try again'); return; }
+      askPin(T('Enter PIN'), sub, function (pin) {
+        if (!Store.checkPin(pin)) { ask(T('Wrong PIN — try again')); return; }
         applyLock(c, !locked);
       });
     };
-    ask((locked ? 'To unlock ' : 'To lock ') + c.name);
+    ask(locked ? T('To unlock {name}', { name: c.name })
+               : T('To lock {name}', { name: c.name }));
   }
 
 
@@ -535,14 +568,15 @@
     var mine = numOf(c);
     var current = Store.channelNumber(profile.id, c.key);
     var sub = current
-      ? 'Now ' + current + ', playlist says ' + (c.num || '—') + '. Type a new number.'
-      : 'Now ' + (c.num || '—') + ', from the playlist. Type a new number.';
+      ? T('Now {n}, playlist says {orig}. Type a new number.',
+          { n: current, orig: c.num || '—' })
+      : T('Now {n}, from the playlist. Type a new number.', { n: c.num || '—' });
 
     U.numberPrompt(c.name, sub, function (n) {
       if (n === null) return;
       if (n === 0) {
         Store.setChannelNumber(profile.id, c.key, 0);
-        U.toast('Number reset to ' + (c.num || '—'));
+        U.toast(T('Number reset to {n}', { n: c.num || '—' }));
         C.reloadGroups();
         return;
       }
@@ -550,25 +584,26 @@
 
       var other = numberHolder(n, c.key);
       if (other) {
-        U.confirm('Channel ' + n + ' is ' + other.name + '. Swap their numbers?',
+        U.confirm(T('Channel {n} is {name}. Swap their numbers?', { n: n, name: other.name }),
           function (yes) {
             if (!yes) return;
             Store.setChannelNumber(profile.id, other.key, mine);
             Store.setChannelNumber(profile.id, c.key, n);
-            U.toast('Swapped with ' + other.name + ' — it is now ' + mine);
+            U.toast(T('Swapped with {name} — it is now {n}', { name: other.name, n: mine }));
             C.reloadGroups();
           });
         return;
       }
 
-      Store.setChannelNumber(profile.id, c.key, n);
-      U.toast('Set to ' + n);
+      Store.setChannelNumber(profile.id, c.key, n, c.num);
+      U.toast(T('Set to {n}', { n: n }));
       C.reloadGroups();       // sorting by number re-orders the list under it
     });
   }
   function applyLock(c, on) {
     Store.setLocked(profile.id, c.key, on);
-    U.toast(c.name + (on ? ' is locked' : ' is unlocked'));
+    U.toast(on ? T('{name} is locked', { name: c.name })
+               : T('{name} is unlocked', { name: c.name }));
     // A lock that leaves the picture running is not a lock.
     if (on && needsPin(c) && c.key === playingKey) {
       if (fullscreen) leaveFullscreen();
@@ -628,8 +663,11 @@
     var g = groups[idx];
     if (!g) return;
     if (changed) {
+      /* T() on the way to the screen, not on the way into the array: the
+         three built-in groups are stored under their English names, and a
+         provider's own category comes back from T() unchanged. */
       node.innerHTML = '<span class="gcount">' + (g.kind === 'group' ? g.count : '') + '</span>' +
-                       U.esc(g.name);
+                       U.esc(T(g.name));
     }
     node.classList.toggle('pinned', g.kind !== 'group');
     node.classList.toggle('selected', idx === groupIdx);
@@ -652,7 +690,10 @@
     }
     var numEl = node.querySelector('.ch-num');
     numEl.textContent = numOf(c) || (idx + 1);
-    numEl.classList.toggle('custom', !!Store.channelNumber(profile.id, c.key));
+    /* Amber means "you moved this one", so a number that matches the playlist
+       is not amber even if a record of it survives. */
+    var over = Store.channelNumber(profile.id, c.key);
+    numEl.classList.toggle('custom', !!over && over !== c.num);
     paintRowEpg(node, c);
     // Drawn in CSS, never a glyph: no font on the TV is guaranteed to have one.
     node.querySelector('.ch-fav').className =
@@ -739,12 +780,12 @@
      work out anyway. */
   function timeLeft(prog, at) {
     var ms = prog.e - (at || Date.now());
-    if (ms <= 0) return 'ending';
+    if (ms <= 0) return T('ending');
     var mins = Math.round(ms / 60000);
-    if (mins < 1) return 'ending';
-    if (mins < 60) return mins + ' min left';
+    if (mins < 1) return T('ending');
+    if (mins < 60) return T('{n} min left', { n: mins });
     var h = Math.floor(mins / 60), m = mins % 60;
-    return h + 'h' + (m ? ' ' + m + 'm' : '') + ' left';
+    return m ? T('{h}h {m}m left', { h: h, m: m }) : T('{h}h left', { h: h });
   }
 
   function paintBadge() {
@@ -779,6 +820,15 @@
      GUIDE_H to `.epg-row`'s height, or the row on air stops being centred by
      arithmetic and starts being centred by luck. */
   var PANEL_ROWS = 9, PANEL_BEFORE = 4, PANEL_VIEW = 5;
+
+  /* Two ways to read a panel this size. Centred is the default: what is on
+     in the middle, with what has just been on above it — that is the shape
+     of a channel you are half-watching. Ahead is for planning the evening:
+     what is on at the top and nothing but the future under it, which is
+     nine programmes of schedule instead of four. */
+  function panelBefore() {
+    return Store.settings().guideView === 'ahead' ? 0 : PANEL_BEFORE;
+  }
 
   /* Where the cursor rests in a channel's schedule, and which row the panel
      marks — one answer, used everywhere, because two answers is how the panel
@@ -819,7 +869,13 @@
     var now = Date.now();
     var live = onAirIn(full, now) !== -1;   // is anything actually on air?
     var at = parkIndex(full, now);
-    var from = U.clamp(at - PANEL_BEFORE, 0, Math.max(0, full.length - PANEL_ROWS));
+    /* Centred slides the window back so nine rows are always full; ahead
+       starts at what is on and takes however many follow, because sliding
+       back to fill the panel is exactly the past it was asked not to show. */
+    var before = panelBefore();
+    var from = before
+      ? U.clamp(at - before, 0, Math.max(0, full.length - PANEL_ROWS))
+      : at;
     var list = full.slice(from, from + PANEL_ROWS);
     var park = at - from;                   // where that row landed in the window
     var host = U.$('epg-list');
@@ -831,9 +887,10 @@
          channel: every row would otherwise read "no guide for this channel"
          with nothing anywhere to explain why. */
       U.$('epg-empty').textContent =
-        (!EPG.hasData() && App.epgError) ? 'Guide unavailable — ' + App.epgError
-        : App.epgLoading ? 'Loading the guide…'
-        : 'No guide for this channel';
+        (!EPG.hasData() && App.epgError)
+          ? T('Guide unavailable — {why}', { why: App.epgError })
+        : App.epgLoading ? T('Loading the guide…')
+        : T('No guide for this channel');
       U.$('epg-empty').classList.remove('hidden');
       U.$('epg-day').textContent = '';
       return;
@@ -852,9 +909,6 @@
       if (i === park && live) cls += ' now';
       else if (p.e <= now) cls += ' past';
       if (i === park && !live) cls += ' here';
-      /* The programme either side of the middle one is a size up from the
-         rest: the panel should read outwards from what is on. */
-      if (i === park - 1 || i === park + 1) cls += ' near';
       if (Catchup.available(profile, c, p, now)) cls += ' replay';
       var rem = (p.s > now) && Store.hasReminder(profile.id, c.key, p.s);
       if (rem) cls += ' reminded';
@@ -862,6 +916,7 @@
               '<span class="epg-time">' + U.hhmm(new Date(p.s)) + '</span>' +
               '<span class="epg-body"><span class="epg-name">' + U.esc(p.t) +
               (cls.indexOf(' replay') > -1 ? '<i class="epg-replay"></i>' : '') +
+              (i === park && live ? '<i class="epg-play"></i>' : '') +
               (rem ? '<i class="epg-remind"></i>' : '') + '</span>' +
               ((i === park && live)
                 ? '<span class="epg-bar"><i style="width:' + EPG.progress(p, now) + '%"></i></span>'
@@ -892,9 +947,9 @@
     var now = Date.now();
     if (onAirIn(guide, now) !== -1) return dayLabel(guide[guideIdx].s);
     var last = guide[guide.length - 1], first = guide[0];
-    if (last.e <= now) return 'Guide ends ' + U.hhmm(new Date(last.e));
-    if (first.s > now) return 'Starts ' + U.hhmm(new Date(first.s));
-    return 'Nothing on air';
+    if (last.e <= now) return T('Guide ends {time}', { time: U.hhmm(new Date(last.e)) });
+    if (first.s > now) return T('Starts {time}', { time: U.hhmm(new Date(first.s)) });
+    return T('Nothing on air');
   }
   /* Just after midnight the programme on air started "yesterday", so that case
      needs a name of its own — otherwise the guide reads "Wednesday" at 00:05
@@ -902,12 +957,12 @@
   function dayLabel(ms) {
     var d = new Date(ms);
     var t = new Date();
-    if (d.toDateString() === t.toDateString()) return 'Today';
+    if (d.toDateString() === t.toDateString()) return T('Today');
     t.setDate(t.getDate() - 1);
-    if (d.toDateString() === t.toDateString()) return 'Yesterday';
+    if (d.toDateString() === t.toDateString()) return T('Yesterday');
     t.setDate(t.getDate() + 2);
-    if (d.toDateString() === t.toDateString()) return 'Tomorrow';
-    return DAYS[d.getDay()];
+    if (d.toDateString() === t.toDateString()) return T('Tomorrow');
+    return T(DAYS[d.getDay()]);
   }
 
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -925,7 +980,7 @@
     U.$('search-box').classList.toggle('hidden', !searching);
     U.$('list-title').classList.toggle('hidden', searching);
     var g = groups[groupIdx];
-    U.$('list-title').textContent = g ? g.name : '';
+    U.$('list-title').textContent = g ? T(g.name) : '';
   }
 
   /* `animate` is for the cursor moving inside the panel, where the slide is
@@ -973,8 +1028,11 @@
     var total = guide.length * GUIDE_H;
 
     if (total <= h) {
-      // Fewer programmes than the panel can show: centre the block instead.
-      slideGuide(host, (h - total) / 2, animate);
+      /* Fewer programmes than the panel can show. Centre the block — unless
+         the panel was asked to start at what is on, in which case it starts
+         at the top and the empty space goes underneath. */
+      var ahead = Store.settings().guideView === 'ahead';
+      slideGuide(host, ahead ? 0 : (h - total) / 2, animate);
       box.classList.remove('scrolls');
       return;
     }
@@ -985,7 +1043,8 @@
        fills itself properly instead of leaving space above a guide that
        simply has not started yet. */
     var onAir = onAirIn(guide, Date.now());
-    var holdCentre = (pane !== 'epg') && onAir !== -1 && onAir === guideIdx;
+    var holdCentre = (pane !== 'epg') && onAir !== -1 && onAir === guideIdx &&
+                     Store.settings().guideView !== 'ahead';
     if (holdCentre) top = Math.min(top, total - h);
     else top = U.clamp(top, 0, total - h);
     slideGuide(host, -top, animate);
@@ -1003,12 +1062,12 @@
 
      It went back to being read-only in 0.5 because right from the list was the
      only way in and that key was wanted for the channel panel. It is a place
-     again now, reached by INFO or by "What's on" in that panel — neither of
+     again now, reached by INFO or by "Schedule" in that panel — neither of
      which takes a key away from anything else. */
 
   function enterGuide() {
     if (!guide.length) {
-      U.toast(EPG.hasData() ? 'No guide for this channel' : 'The guide has not loaded');
+      U.toast(EPG.hasData() ? T('No guide for this channel') : T('The guide has not loaded'));
       return;
     }
     pane = 'epg';
@@ -1039,7 +1098,7 @@
 
     if (p.e <= now) {
       if (!Catchup.available(profile, c, p, now)) {
-        U.toast('No catch-up for this programme');
+        U.toast(T('No catch-up for this programme'));
         return;
       }
       leaveGuide();
@@ -1060,12 +1119,17 @@
     var on = Store.hasReminder(profile.id, c.key, p.s);
     if (on) {
       Store.clearReminder(profile.id, c.key, p.s);
-      U.toast('Reminder off');
+      U.toast(T('Reminder off'));
     } else {
       Store.setReminder(profile.id, {
-        chKey: c.key, chName: c.name, start: p.s, stop: p.e, title: p.t
+        chKey: c.key, chName: c.name, start: p.s, stop: p.e, title: p.t,
+        /* What the guide says it is, and what the channel looks like: the
+           reminder has to be able to introduce the programme hours later,
+           by which time the guide may have been rebuilt or dropped. */
+        desc: p.d || '', logo: c.logo || ''
       });
-      U.toast('Reminder set for ' + U.hhmm(new Date(p.s)) + ' — ' + p.t);
+      U.toast(T('Reminder set for {time} — {title}',
+                { time: U.hhmm(new Date(p.s)), title: p.t }));
     }
     paintGuide(true);
     markGuide(false);
@@ -1181,6 +1245,19 @@
     return !!el && !el.classList.contains('hidden');
   }
 
+  /* Only reachable while it is on screen, which means while the info bar is
+     up: it is part of the bar, not an overlay of its own. */
+  function liveBtnVisible() {
+    var el = U.$('osd-back');
+    return !!el && !el.classList.contains('hidden') && osdVisible();
+  }
+
+  function setLiveFocus(on) {
+    liveFocus = !!on;
+    var el = U.$('osd-back');
+    if (el) el.classList.toggle('focused', liveFocus && !el.classList.contains('hidden'));
+  }
+
   function setStallFocus(on) {
     stallFocus = !!on && stallVisible();
     var el = U.$('stall-warn');
@@ -1203,11 +1280,12 @@
     var c = playingCh;
     if (!c) return;
     setStallFocus(false);
+    setLiveFocus(false);
     cancelSeek();
     playingProg = null;
     play(c);
     repaintAll();
-    U.toast('Back to live');
+    U.toast(T('Back to live'));
     if (fullscreen) showOsd();
   }
 
@@ -1274,13 +1352,13 @@
   /* How far back, in words. Takes ms so a 30-second step does not round up
      to "1 min" and look like nothing happened. */
   function fmtBack(ms) {
-    if (ms < 60000) return Math.round(ms / 1000) + ' sec';
+    if (ms < 60000) return T('{n} sec', { n: Math.round(ms / 1000) });
     var mins = Math.round(ms / 60000);
-    if (mins < 60) return mins + ' min';
+    if (mins < 60) return T('{n} min', { n: mins });
     var h = Math.floor(mins / 60), m = mins % 60;
-    if (h < 24) return h + 'h' + (m ? ' ' + m + 'm' : '');
-    var d = Math.floor(h / 24);
-    return d + 'd' + ((h % 24) ? ' ' + (h % 24) + 'h' : '');
+    if (h < 24) return m ? T('{h}h {m}m', { h: h, m: m }) : T('{h}h', { h: h });
+    var d = Math.floor(h / 24), rest = h % 24;
+    return rest ? T('{d}d {h}h', { d: d, h: rest }) : T('{d}d', { d: d });
   }
 
   function play(c) {
@@ -1311,8 +1389,8 @@
     var url = Catchup.url(profile, c, prog);
     if (!url) {
       U.toast(Catchup.supported(profile, c)
-        ? 'That is outside the recorded window'
-        : 'This channel has no catch-up');
+        ? T('That is outside the recorded window')
+        : T('This channel has no catch-up'));
       return;
     }
     playingKey = c.key;
@@ -1335,7 +1413,7 @@
     var now = Date.now();
     if (ms >= now - LIVE_EDGE) { play(c); repaintAll(); return; }
     var url = Catchup.urlAt(profile, c, ms, ms + 4 * 3600000, now);
-    if (!url) { U.toast('This channel cannot be rewound'); return; }
+    if (!url) { U.toast(T(NO_CATCHUP)); return; }
     playingKey = c.key;
     playingCh = c;
     playingProg = progAt(c, ms);
@@ -1368,7 +1446,7 @@
     // Films and episodes seek for real, forwards as well as back.
     if (seekMedia(deltaMs)) return;
     if (!Catchup.supported(profile, c)) {
-      U.toast('This channel cannot be rewound');
+      U.toast(T(NO_CATCHUP));
       return;
     }
     var now = Date.now();
@@ -1415,7 +1493,7 @@
     var pct = U.clamp((seekTo - lo) / span * 100, 0, 100);
     U.$('seek-target').textContent = U.hhmmss(new Date(seekTo));
     U.$('seek-delta').textContent = (now - seekTo) < LIVE_EDGE
-      ? 'Live' : '-' + fmtBack(now - seekTo);
+      ? T('Live') : '-' + fmtBack(now - seekTo);
     U.$('seek-fill').style.width = pct + '%';
     U.$('seek-knob').style.left = pct + '%';
     U.$('seek-lo').textContent = dayLabel(lo) + '  ' + U.hhmm(new Date(lo));
@@ -1482,11 +1560,11 @@
       if (playingKey !== c.key || Player.isPlaying()) return;
       U.$('preview-spinner').classList.add('hidden');
       U.$('stage').classList.remove('preview-on');
-      U.$('preview-hint').textContent = U.isTizen
+      U.$('preview-hint').textContent = U.isTV
         ? (c.name + ' will not start — the stream may be offline')
         : (c.name + ' will not start here — it may be offline, or interlaced, ' +
            'which this browser cannot decode but the TV can');
-      if (fullscreen) U.toast('Could not start ' + c.name);
+      if (fullscreen) U.toast(T('Could not start {name}', { name: c.name }));
     }, STALL_MS);
   }
 
@@ -1554,6 +1632,15 @@
     var isLive = behind < LIVE_EDGE;
 
     /* A recording has no live edge to be at or behind, so it says neither. */
+    /* The button belongs to the bar, so it is painted with it: the bar is
+       the only place it exists and the only time it can be reached. */
+    var back = U.$('osd-back');
+    if (back) {
+      var showBack = !isLive && !Player.seekable();   // a recording has no live edge
+      back.classList.toggle('hidden', !showBack);
+      if (!showBack) setLiveFocus(false);
+      back.classList.toggle('focused', liveFocus && showBack);
+    }
     U.$('osd-num').innerHTML = U.esc('CH ' + (numOf(c) || (chIdx + 1))) +
       (Player.seekable() ? '' :
         '<span class="osd-live' + (isLive ? '' : ' replay') + '">' +
@@ -1616,6 +1703,7 @@
   }
 
   function hideOsd() {
+    setLiveFocus(false);
     if (osdTimer) { clearTimeout(osdTimer); osdTimer = null; }
     stopTsClock();
     U.$('osd').classList.add('hidden');
@@ -1642,7 +1730,7 @@
     // numOf, not .num — the dial has to follow the numbers the user assigned.
     for (var i = 0; i < view.length; i++) if (numOf(view[i]) === wanted) { hit = i; break; }
     if (hit === -1 && wanted <= view.length) hit = wanted - 1;
-    if (hit === -1) { U.toast('No channel ' + wanted); return; }
+    if (hit === -1) { U.toast(T('No channel {n}', { n: wanted })); return; }
     chIdx = hit;
     /* Typing a number is as deliberate as pressing OK on the row, so it plays.
        The rule that nothing starts on its own is about moving the cursor, not
@@ -1682,13 +1770,39 @@
     U.$('search-input').addEventListener('input', onSearchInput, false);
   };
 
+  /* ---------------- the clock over the list ----------------
+
+     A television is also the thing people look at to find out the time, and
+     the head of the channel list is the emptiest, most looked-at strip on the
+     screen. The name of the list moves under it rather than away: it still
+     has to say which list this is, it just is not the headline.
+
+     Ticked every ten seconds rather than every minute, because a clock that
+     is a minute behind is worse than no clock — and a text write costs
+     nothing next to what the guide tick already does. */
+  function paintClock() {
+    var el = U.$('head-clock');
+    if (!el) return;
+    var d = new Date();
+    el.textContent = U.hhmm(d);
+    U.$('head-date').textContent = dateString(d);
+  }
+
+  function dateString(d) {
+    var f = 'long';
+    try { f = Store.settings().dateFormat || 'long'; } catch (e) {}
+    return U.dateLabel(d, f);
+  }
+
   /* ---------------- timers ---------------- */
 
   function startTimers() {
+    paintClock();
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = setInterval(function () {
+      paintClock();
       if (!U.$('osd').classList.contains('hidden')) U.$('osd-clock').textContent = U.hhmm(new Date());
-    }, 20000);
+    }, 10000);
 
     if (epgTimer) clearInterval(epgTimer);
     epgTimer = setInterval(function () {
@@ -1754,9 +1868,9 @@
           playingCh && reconnects < MAX_RECONNECT && !reconnectTimer) {
         reconnects++;
         U.$('preview-hint').textContent =
-          'Reconnecting\u2026 (' + reconnects + '/' + MAX_RECONNECT + ')';
+          T('Reconnecting… ({n}/{of})', { n: reconnects, of: MAX_RECONNECT });
         U.$('stage').classList.remove('preview-on');
-        if (fullscreen) U.toast('Reconnecting\u2026');
+        if (fullscreen) U.toast(T('Reconnecting…'));
         reconnectTimer = setTimeout(reconnectNow, RECONNECT_WAIT);
         return;
       }
@@ -1765,9 +1879,9 @@
       // black panel with no explanation. Say *why* when we know: "unavailable"
       // is misleading for a stream the browser simply refuses to decode.
       U.$('preview-hint').textContent = Player.isDecodeError(arg)
-        ? arg
-        : (c ? (c.name + ' is unavailable') : 'Unavailable');
-      if (fullscreen) U.toast(arg || 'Playback failed');
+        ? T(arg)
+        : (c ? T('{name} is unavailable', { name: c.name }) : T('Unavailable'));
+      if (fullscreen) U.toast(arg || T('Playback failed'));
       else U.$('stage').classList.remove('preview-on');
     }
   };
@@ -1823,6 +1937,14 @@
         if (a === 'down' || a === 'back' || a === 'up') return;
       } else if (a === 'up' && stallVisible()) {
         setStallFocus(true);
+        return;
+      } else if (liveFocus) {
+        if (a === 'ok') { setLiveFocus(false); backToLive(); return; }
+        setLiveFocus(false);
+        if (a === 'up' || a === 'down') return;   // the press that let it go
+      } else if (a === 'up' && liveBtnVisible()) {
+        setLiveFocus(true);
+        showOsd();                    // keep the bar up while it is being aimed at
         return;
       }
 
@@ -1884,7 +2006,7 @@
         case 'up':     return;
         case 'yellow': App.openSettings(); return;
         case 'blue':   App.refreshPlaylist(); return;
-        case 'exit':   U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); }); return;
+        case 'exit':   U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); }); return;
         default: return;
       }
     }
@@ -1892,7 +2014,7 @@
     /* The guide panel under the player is somewhere to go again, but not by
        stealing right from the channel list — right is about the channel, and
        the schedule is one of the things the channel panel offers. The ways in
-       are INFO (one press, no menu) and "What's on" in that panel.
+       are INFO (one press, no menu) and "Schedule" in that panel.
 
        Up and down walk the five programmes; OK does whatever that programme
        allows — replay one that has finished, watch the one on air, be reminded
@@ -1962,8 +2084,7 @@
         return;
 
       case 'ok':
-        if (pane === 'groups' && railFoot === 0) { enterSearch(); return; }
-        if (pane === 'groups' && railFoot === 1) { App.openSettings(); return; }
+        if (pane === 'groups' && railFoot === 0) { App.openSettings(); return; }
         if (pane === 'groups') { pane = 'channels'; railFoot = -1; repaintAll(); return; }
         var sel = view[chIdx];
         if (!sel) return;
@@ -2000,11 +2121,11 @@
         }
         if (pane === 'channels' && groupIdx !== 0) { groupIdx = 0; applyGroup(); return; }
         if (pane === 'channels') { pane = 'groups'; repaintAll(); return; }
-        U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); });
+        U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
         return;
 
       case 'exit':
-        U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); });
+        U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
         return;
     }
   };
@@ -2026,40 +2147,40 @@
 
     CTX = [];
     if (fullscreen) {
-      if (isBehind()) CTX.push({ icon: '🔴', label: 'Back to live', run: backToLive });
-      CTX.push({ icon: '⇲', label: 'Leave full screen',
+      if (isBehind()) CTX.push({ icon: '🔴', label: T('Back to live'), run: backToLive });
+      CTX.push({ icon: '⇲', label: T('Leave full screen'),
                  run: function () { closeCtx(); leaveFullscreen(); } });
     } else {
       CTX.push({
         icon: '▶',
-        label: playing ? 'Go full screen' : 'Watch full screen',
+        label: playing ? T('Go full screen') : T('Watch full screen'),
         run: function () {
           closeCtx();
           if (playing) { enterFullscreen(); return; }
           withPin(c, function () { play(c); repaintAll(); enterFullscreen(); });
         }
       });
-      if (playing && isBehind()) CTX.push({ icon: '🔴', label: 'Back to live', run: backToLive });
+      if (playing && isBehind()) CTX.push({ icon: '🔴', label: T('Back to live'), run: backToLive });
     }
     /* The way into the guide panel that does not need a key to be known. */
     if (!fullscreen) {
-      CTX.push({ icon: '🗓', label: "What's on",
+      CTX.push({ icon: '🗓', label: T('Schedule'),
                  run: function () { closeCtx(); enterGuide(); } });
     }
-    CTX.push({ icon: '📺', label: 'Catch-up guide',
+    CTX.push({ icon: '📺', label: T('Catch-up guide'),
                run: function () { closeCtx(); openReplay(); } });
     CTX.push({
       icon: '⭐',
-      label: Store.isFav(profile.id, c.key) ? 'Remove from favourites' : 'Add to favourites',
+      label: Store.isFav(profile.id, c.key) ? T('Remove from favourites') : T('Add to favourites'),
       run: function () { closeCtx(); toggleFav(); }
     });
-    CTX.push({ icon: '🔢', label: 'Change channel number',
+    CTX.push({ icon: '🔢', label: T('Change channel number'),
                run: function () { closeCtx(); editNumber(c); } });
     /* Parental control, one channel at a time. The adult filter is a guess at
        a name; this is the viewer pointing at a channel. */
     CTX.push({
       icon: locked ? '🔓' : '🔒',
-      label: locked ? 'Unlock this channel' : 'Lock with PIN',
+      label: locked ? T('Unlock this channel') : T('Lock with PIN'),
       run: function () { closeCtx(); toggleLock(c); }
     });
 
@@ -2101,27 +2222,24 @@
 
   var MENU = [], menuIdx = 0;
 
-  function goGroup(i) {
-    pane = 'channels';
-    groupIdx = U.clamp(i, 0, groups.length - 1);
-    applyGroup();
-  }
-
+  /* Favourites and Recently watched used to be here. They are the first two
+     rows of the groups rail, and this drawer opens by going left past that
+     rail — so they offered to send somebody back to the thing they had just
+     walked through. What is left is only what is nowhere else. */
   function openMenu() {
     MENU = [
-      { icon: '🔍', label: 'Search',           run: function () { closeMenu(); enterSearch(); } },
-      { icon: '⭐', label: 'Favourites',       run: function () { closeMenu(); goGroup(1); } },
-      { icon: '🕘', label: 'Recently watched', run: function () { closeMenu(); goGroup(2); } },
-      { icon: '📺', label: 'Catch-up',         run: function () { closeMenu(); openReplay(); } },
-      { icon: '⚙️', label: 'Settings',         run: function () { closeMenu(); App.openSettings(); } },
-      { icon: '🔄', label: 'Reload playlist',  run: function () { closeMenu(); App.refreshPlaylist(); } }
+      { icon: '🔍', label: T('Search'),           run: function () { closeMenu(); enterSearch(); } },
+      { icon: '🗓', label: T('TV catalogue'),     run: function () { closeMenu(); CatalogView.open(profile); } },
+      { icon: '📺', label: T('Catch-up'),         run: function () { closeMenu(); openReplay(); } },
+      { icon: '⚙️', label: T('Settings'),         run: function () { closeMenu(); App.openSettings(); } },
+      { icon: '🔄', label: T('Reload playlist'),  run: function () { closeMenu(); App.refreshPlaylist(); } }
     ];
-    if (!U.isTizen) {
-      MENU.push({ icon: '⌨️', label: 'Keyboard keys', run: function () { closeMenu(); U.help(); } });
+    if (!U.isTV) {
+      MENU.push({ icon: '⌨️', label: T('Keyboard keys'), run: function () { closeMenu(); U.help(); } });
     }
-    MENU.push({ icon: '🚪', label: 'Exit', run: function () {
+    MENU.push({ icon: '🚪', label: T('Exit'), run: function () {
       closeMenu();
-      U.confirm('Exit AquaPlay?', function (yes) { if (yes) Keys.exitApp(); });
+      U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
     } });
 
     menuIdx = 0;
@@ -2145,7 +2263,7 @@
   function openReplay() {
     var c = view[chIdx];
     if (!c) return;
-    if (section !== 'live') { U.toast('Catch-up is for live channels'); return; }
+    if (section !== 'live') { U.toast(T('Catch-up is for live channels')); return; }
     ReplayView.open(profile, c);
   }
 
@@ -2168,7 +2286,7 @@
     var c = view[chIdx];
     if (!c) return;
     var on = Store.toggleFav(profile.id, c.key);
-    U.toast(on ? '★ Added to favourites' : 'Removed from favourites');
+    U.toast(on ? T('★ Added to favourites') : T('Removed from favourites'));
     var g = groups[groupIdx];
     if (g && g.kind === 'fav') applyGroup();
     else { chList.invalidate(); repaintAll(); }

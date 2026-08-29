@@ -55,10 +55,10 @@
   /* login -> Promise<{userInfo, serverInfo, formats}> */
   X.login = function (p) {
     return Net.json(api(p), { timeout: 20000 }).then(function (d) {
-      if (!d || !d.user_info) throw new Error('Unexpected response from server');
-      if (String(d.user_info.auth) !== '1') throw new Error('Wrong username or password');
+      if (!d || !d.user_info) throw new Error(T('Unexpected response from server'));
+      if (String(d.user_info.auth) !== '1') throw new Error(T('Wrong username or password'));
       var st = String(d.user_info.status || '').toLowerCase();
-      if (st && st !== 'active') throw new Error('Account is ' + d.user_info.status);
+      if (st && st !== 'active') throw new Error(T('Account is {status}', { status: d.user_info.status }));
       return {
         userInfo: d.user_info,
         serverInfo: d.server_info || {},
@@ -71,7 +71,7 @@
   X.pickFormat = function (formats, setting) {
     if (setting === 'ts' || setting === 'm3u8') return setting;
     var has = function (f) { return (formats || []).indexOf(f) > -1; };
-    if (!U.isTizen) return has('m3u8') ? 'm3u8' : 'ts';
+    if (!U.isTV) return has('m3u8') ? 'm3u8' : 'ts';
     return has('m3u8') ? 'm3u8' : 'ts';
   };
 
@@ -88,15 +88,15 @@
 
   /* load(profile, ext, onProgress) -> Promise<{channels, groups}> */
   X.load = function (p, ext, onProgress) {
-    if (onProgress) onProgress(10, 'Fetching categories');
+    if (onProgress) onProgress(10, T('Fetching categories'));
     return Net.json(api(p, 'action=get_live_categories'), { timeout: 30000 })
       .then(function (cats) {
-        if (onProgress) onProgress(35, 'Fetching channels');
+        if (onProgress) onProgress(35, T('Fetching channels'));
         return Net.json(api(p, 'action=get_live_streams'), { timeout: 60000 })
           .then(function (streams) { return { cats: cats, streams: streams }; });
       })
       .then(function (r) {
-        if (onProgress) onProgress(80, 'Building list');
+        if (onProgress) onProgress(80, T('Building list'));
         var catName = catIndex(r.cats);
 
         var channels = [];
@@ -124,7 +124,7 @@
           groupCount[grp] = (groupCount[grp] || 0) + 1;
         }
 
-        if (onProgress) onProgress(100, 'Done');
+        if (onProgress) onProgress(100, T('Done'));
         return { channels: channels, groups: buildGroups(r.cats, groupCount) };
       });
   };
@@ -144,15 +144,15 @@
   /* loadVod(profile, onProgress) -> Promise<{channels, groups}>
      Shaped exactly like X.load so the browse screen can list it unchanged. */
   X.loadVod = function (p, onProgress) {
-    if (onProgress) onProgress(10, 'Fetching movie categories');
+    if (onProgress) onProgress(10, T('Fetching movie categories'));
     return Net.json(api(p, 'action=get_vod_categories'), { timeout: 30000 })
       .then(function (cats) {
-        if (onProgress) onProgress(35, 'Fetching movies');
+        if (onProgress) onProgress(35, T('Fetching movies'));
         return Net.json(api(p, 'action=get_vod_streams'), { timeout: 90000 })
           .then(function (streams) { return { cats: cats, streams: streams }; });
       })
       .then(function (r) {
-        if (onProgress) onProgress(80, 'Building list');
+        if (onProgress) onProgress(80, T('Building list'));
         var catName = catIndex(r.cats);
         var items = [], counts = {};
         var list = r.streams || [];
@@ -180,7 +180,7 @@
           counts[grp] = (counts[grp] || 0) + 1;
         }
 
-        if (onProgress) onProgress(100, 'Done');
+        if (onProgress) onProgress(100, T('Done'));
         return { channels: items, groups: buildGroups(r.cats, counts) };
       });
   };
@@ -188,15 +188,15 @@
   /* loadSeries(profile, onProgress) -> Promise<{channels, groups}>
      Items carry seriesId and no url: episodes are fetched on demand. */
   X.loadSeries = function (p, onProgress) {
-    if (onProgress) onProgress(10, 'Fetching series categories');
+    if (onProgress) onProgress(10, T('Fetching series categories'));
     return Net.json(api(p, 'action=get_series_categories'), { timeout: 30000 })
       .then(function (cats) {
-        if (onProgress) onProgress(35, 'Fetching series');
+        if (onProgress) onProgress(35, T('Fetching series'));
         return Net.json(api(p, 'action=get_series'), { timeout: 90000 })
           .then(function (rows) { return { cats: cats, rows: rows }; });
       })
       .then(function (r) {
-        if (onProgress) onProgress(80, 'Building list');
+        if (onProgress) onProgress(80, T('Building list'));
         var catName = catIndex(r.cats);
         var items = [], counts = {};
         var list = r.rows || [];
@@ -223,7 +223,7 @@
           counts[grp] = (counts[grp] || 0) + 1;
         }
 
-        if (onProgress) onProgress(100, 'Done');
+        if (onProgress) onProgress(100, T('Done'));
         return { channels: items, groups: buildGroups(r.cats, counts) };
       });
   };

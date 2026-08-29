@@ -1,11 +1,12 @@
 {
   "name": "aquaplay-iptv",
-  "version": "0.7.21",
+  "version": "0.7.35",
   "private": true,
   "description": "Lightweight IPTV player for Samsung Tizen TVs",
   "scripts": {
     "start": "node tools/dev-server.js",
     "pack": "node tools/pack.js",
+    "icons": "node tools/make-icon.js",
     "test": "node tools/test-units.js && node tools/test-proxy.js && node tools/e2e.js && node tools/e2e-vod.js",
     "test:units": "node tools/test-units.js",
     "test:e2e": "node tools/e2e.js",

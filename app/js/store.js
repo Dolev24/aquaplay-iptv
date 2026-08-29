@@ -17,20 +17,27 @@
     lastChannel: {},       // { profileId: channelKey }
     numbers: {},           // { profileId: { channelKey: number } } — user overrides
     locked: {},            // { profileId: { channelKey: 1 } } — hidden behind the PIN
-    reminders: {},         // { profileId: [{ chKey, chName, start, stop, title }] }
+    reminders: {},         // { profileId: [{ chKey, chName, start, stop, title, desc, logo }] }
     settings: {
       epg: true,           // load EPG
       epgHours: 8,         // how far ahead to keep programmes (no Settings row)
       catchupHours: 168,   // how far back, for replaying what already aired (7 days)
       hideEmptyGroups: true,
       startupPlayLast: true,
-      sortBy: 'provider',  // provider | number
+      sortBy: 'number',    // provider | number
+      /* How the date over the channel list is written. Nobody agrees about
+         this and everybody is sure, so it is a setting rather than a guess
+         from the locale — which would be a guess about the viewer from the
+         language their television is set to. */
+      dateFormat: 'long',  // long | short | dmy | mdy | iso | off
+      guideView: 'ahead',  // ahead | centred — where the panel puts what is on
       pictureSize: 'fill', // fit | fill | stretch
       epgOffset: 0,        // hours to shift the guide by, for wrong-timezone XMLTV
       clock24: true,       // 24-hour or am/pm
       autoReconnect: true, // retry a dropped stream instead of just failing
       hlsEngine: 'auto',   // auto | hlsjs | native   (browser only)
       theme: 'dark',       // dark | light
+      lang: '',            // '' = follow the TV; otherwise an I18N.LANGS code
       arrowZap: true,      // up/down change channel in fullscreen
       altRows: true,       // shade every other row of the channel list
       startGroup: 'all',   // all | fav | recent
@@ -158,7 +165,12 @@
     var n = numMap(pid)[key];
     return (typeof n === 'number' && n > 0) ? n : null;
   };
-  S.setChannelNumber = function (pid, key, n) {
+  /* A number equal to the one the playlist already gives is not an override:
+     storing it would mark the channel as changed for ever and give Reset
+     something to undo that undoes nothing. Callers pass the playlist number
+     as `orig` when they know it. */
+  S.setChannelNumber = function (pid, key, n, orig) {
+    if (orig && n === orig) n = 0;
     var m = numMap(pid);
     if (!n || n < 1) delete m[key]; else m[key] = Math.floor(n);
     save();

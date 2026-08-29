@@ -30,16 +30,16 @@
 
   function labelFor(start, now) {
     var t = dayStartOf(now);
-    if (start === t) return 'Today';
+    if (start === t) return T('Today');
     var y = new Date(t);
     y.setDate(y.getDate() - 1);
-    if (start === y.getTime()) return 'Yesterday';
-    return DAY_NAMES[new Date(start).getDay()];
+    if (start === y.getTime()) return T('Yesterday');
+    return T(DAY_NAMES[new Date(start).getDay()]);
   }
 
   function dateFor(start) {
     var d = new Date(start);
-    return d.getDate() + ' ' + MONTHS[d.getMonth()];
+    return d.getDate() + ' ' + T(MONTHS[d.getMonth()]);
   }
 
   /* ---------------- open ---------------- */
@@ -51,8 +51,8 @@
     var list = EPG.list(ch);
     if (!list.length) {
       U.toast(Catchup.supported(p, ch)
-        ? 'No guide for this channel, so nothing to catch up on'
-        : 'This channel has no catch-up');
+        ? T('No guide for this channel, so nothing to catch up on')
+        : T('This channel has no catch-up'));
       return;
     }
 
@@ -130,10 +130,10 @@
       var p = list[i];
       var cls = 'rp-prog';
       var state = '';
-      if (p.s <= now && now < p.e) { cls += ' now'; state = 'On now'; }
-      else if (p.s > now) { cls += ' future'; state = 'Later'; }
+      if (p.s <= now && now < p.e) { cls += ' now'; state = T('On now'); }
+      else if (p.s > now) { cls += ' future'; state = T('Later'); }
       else if (Catchup.available(profile, channel, p, now)) { cls += ' replay'; }
-      else { cls += ' gone'; state = 'Not kept'; }
+      else { cls += ' gone'; state = T('Not kept'); }
 
       var mins = Math.max(1, Math.round((p.e - p.s) / 60000));
       html += '<div class="' + cls + '">' +
@@ -218,7 +218,7 @@
     var p = items()[progIdx];
     if (!p) return;
     var now = Date.now();
-    if (p.s > now) { U.toast('That has not aired yet'); return; }
+    if (p.s > now) { U.toast(T('That has not aired yet')); return; }
     if (p.s <= now && now < p.e) {
       App.closeReplay();
       Channels.playProgramme(channel, null);   // still on: just go live
@@ -226,8 +226,8 @@
     }
     if (!Catchup.available(profile, channel, p, now)) {
       U.toast(Catchup.supported(profile, channel)
-        ? 'That is older than the provider keeps'
-        : 'This channel has no catch-up');
+        ? T('That is older than the provider keeps')
+        : T('This channel has no catch-up'));
       return;
     }
     App.closeReplay();

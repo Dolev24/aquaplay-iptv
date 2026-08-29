@@ -1,0 +1,15 @@
+# Text is stored with LF whatever the working copy uses, so a clone on another
+# machine gets the same bytes. Windows keeps CRLF locally through core.autocrlf.
+* text=auto
+
+# The Gradle wrapper is run by sh on Linux and macOS: CRLF in it is a syntax
+# error there, and the file is checked out from the repo rather than generated.
+gradlew text eol=lf
+*.bat text eol=crlf
+
+# Nothing here is text, and letting git guess costs a corrupted PNG eventually.
+*.png binary
+*.jpg binary
+*.jar binary
+*.wgt binary
+*.apk binary

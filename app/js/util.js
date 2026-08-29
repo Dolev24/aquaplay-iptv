@@ -7,9 +7,27 @@
   U.$  = function (id) { return document.getElementById(id); };
   U.qs = function (sel, root) { return (root || document).querySelector(sel); };
 
+  /* Which of the three the app is running on.
+
+      `isTizen` used to carry two meanings at once — "this is a Samsung set"
+      and "there is a real player behind the page rather than a <video> in
+      it". The second is what nearly every use of it wanted, and it is now
+      true of Android TV as well, so it has a name of its own: `isTV`. Read
+      the difference as "who is it" against "what can it do".
+
+      The Android shell injects AquaPlayNative before the first script runs,
+      so this is decided by the time anything asks. */
   U.isTizen = (function () {
     try { return !!(w.webapis && w.webapis.avplay); } catch (e) { return false; }
   })();
+
+  U.isAndroid = (function () {
+    try { return !!(w.AquaPlayNative && w.AquaPlayNative.shellVersion); }
+    catch (e) { return false; }
+  })();
+
+  U.isTV = U.isTizen || U.isAndroid;
+  U.platform = U.isTizen ? 'tizen' : (U.isAndroid ? 'android' : 'browser');
 
   U.log = function () {
     if (!U.DEBUG) return;
@@ -46,6 +64,29 @@
   function h12(h) { var x = h % 12; return x === 0 ? 12 : x; }
 
   /* Local wall-clock HH:MM */
+  /* Six ways to write a date, because nobody agrees and everybody is sure.
+     Not read off the locale: that would be guessing at the viewer from the
+     language their television happens to be set to, and a Brit with an
+     American set would get the wrong one with nowhere to say so.
+
+     The day and month names go through the translator; the numeric forms do
+     not, because a slash is a slash in every language. */
+  U.DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                 'Friday', 'Saturday'];
+  U.MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  U.dateLabel = function (d, fmt) {
+    var day = d.getDate(), mon = d.getMonth() + 1, yr = d.getFullYear();
+    var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    if (fmt === 'off')   return '';
+    if (fmt === 'short') return day + ' ' + T(U.MONTH_NAMES[d.getMonth()]);
+    if (fmt === 'dmy')   return p2(day) + '/' + p2(mon) + '/' + yr;
+    if (fmt === 'mdy')   return p2(mon) + '/' + p2(day) + '/' + yr;
+    if (fmt === 'iso')   return yr + '-' + p2(mon) + '-' + p2(day);
+    return T(U.DAY_NAMES[d.getDay()]) + '  ' + day + ' ' + T(U.MONTH_NAMES[d.getMonth()]);
+  };
+
   U.hhmm = function (date) {
     if (!date) return '';
     var h = date.getHours(), m = date.getMinutes();
@@ -89,7 +130,7 @@
     var l = U.$('loader');
     if (!l) return;
     if (show) {
-      U.$('loader-text').textContent = text || 'Loading';
+      U.$('loader-text').textContent = text || T('Loading');
       U.$('loader-progress').classList.add('hidden');
       U.$('loader-progress-fill').style.width = '0%';
       l.classList.remove('hidden');
@@ -115,8 +156,16 @@
   U.confirm = function (text, cb, opts) {
     confirmCb = cb; confirmSel = 1;
     U.$('confirm-text').textContent = text;
-    U.$('confirm-yes').textContent = (opts && opts.yes) || 'Yes';
-    U.$('confirm-no').textContent = (opts && opts.no) || 'No';
+    /* A logo and a description, for the caller that has them. Hidden rather
+       than emptied: an empty element still takes its margins with it. */
+    var logo = U.$('confirm-logo'), desc = U.$('confirm-desc');
+    var src = opts && opts.logo;
+    logo.style.backgroundImage = src ? 'url("' + src + '")' : 'none';
+    logo.classList.toggle('hidden', !src);
+    desc.textContent = (opts && opts.desc) || '';
+    desc.classList.toggle('hidden', !(opts && opts.desc));
+    U.$('confirm-yes').textContent = (opts && opts.yes) || T('Yes');
+    U.$('confirm-no').textContent = (opts && opts.no) || T('No');
     U.$('confirm').classList.remove('hidden');
     U.confirmOpen = true;
     paintConfirm();
@@ -155,7 +204,7 @@
     ['Search',             'G', 'green'],
     ['Reload the playlist','B', 'blue'],
     ['Settings',           'Y', 'yellow'],
-    ["What's on",          'I — and Enter there sets a reminder'],
+    ['Schedule',            'I — and Enter there sets a reminder'],
     ['Channel menu',       'Right from the list'],
     ['Catch-up browser',   'E'],
     ['Menu',              'Left from the groups rail'],
@@ -178,9 +227,9 @@
       var r = HELP_ROWS[i];
       html += '<div class="kh-row">' +
               '<span class="kh-what">' +
-                (r[2] ? '<i class="k k-' + r[2] + '"></i>' : '') + U.esc(r[0]) +
+                (r[2] ? '<i class="k k-' + r[2] + '"></i>' : '') + U.esc(T(r[0])) +
               '</span>' +
-              '<span class="kh-key">' + U.esc(r[1]) + '</span></div>';
+              '<span class="kh-key">' + U.esc(T(r[1])) + '</span></div>';
     }
     U.$('kh-grid').innerHTML = html;
     U.$('keyhelp').classList.remove('hidden');
@@ -195,6 +244,67 @@
 
   /* Numeric entry. Digits type, Back deletes (and closes when empty), OK
      confirms. cb(number|null) — null means cancelled, 0 means "clear it". */
+  /* ---------------- pick one of a list ----------------
+
+     For a setting with more answers than anybody wants to press through. The
+     language row is the reason it exists: ten of them, cycled one key at a
+     time, and overshooting means eight more presses in a language you may not
+     be able to read any more.
+
+     Keyed like the other overlays — keys.js checks U.pickOpen before it hands
+     anything to a view — so nothing underneath has to know it is up. */
+  U.pickOpen = false;
+  var pickCb = null, pickItems = [], pickIdx = 0;
+  var PICK_H = 78;
+
+  U.pick = function (title, items, current, cb) {
+    pickCb = cb;
+    pickItems = items || [];
+    pickIdx = 0;
+    for (var i = 0; i < pickItems.length; i++) {
+      if (pickItems[i].value === current) { pickIdx = i; break; }
+    }
+    U.$('picker-title').textContent = title;
+    var html = '';
+    for (var j = 0; j < pickItems.length; j++) {
+      html += '<div class="picker-row">' + U.esc(pickItems[j].label) + '</div>';
+    }
+    U.$('picker-list').innerHTML = html;
+    U.$('picker').classList.remove('hidden');
+    U.pickOpen = true;
+    paintPick();
+  };
+
+  function paintPick() {
+    var kids = U.$('picker-list').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].className = 'picker-row' + (i === pickIdx ? ' focused' : '');
+    }
+    /* Keep the cursor in view without a scrollbar: the list is moved, the box
+       stays. Same trick as every other list in the app. */
+    var box = U.$('picker-scroll');
+    var h = (box && box.clientHeight) || 600;
+    var top = Math.max(0, (pickIdx + 1) * PICK_H - h);
+    if (pickIdx * PICK_H < top) top = pickIdx * PICK_H;
+    U.$('picker-list').style.transform = 'translateY(' + (-top) + 'px)';
+  }
+
+  U.pickKey = function (e) {
+    var a = e.action;
+    if (a === 'up')   { pickIdx = U.clamp(pickIdx - 1, 0, pickItems.length - 1); paintPick(); return true; }
+    if (a === 'down') { pickIdx = U.clamp(pickIdx + 1, 0, pickItems.length - 1); paintPick(); return true; }
+    if (a === 'ok')   { closePick(pickItems[pickIdx] ? pickItems[pickIdx].value : null); return true; }
+    if (a === 'back' || a === 'exit' || a === 'left') { closePick(null); return true; }
+    return true;
+  };
+
+  function closePick(value) {
+    U.$('picker').classList.add('hidden');
+    U.pickOpen = false;
+    var cb = pickCb; pickCb = null; pickItems = [];
+    if (cb) cb(value);
+  }
+
   U.numberOpen = false;
   var numCb = null, numBuf = '', numMax = 4, numRaw = false, numMask = false, numAuto = 0;
 
@@ -251,7 +361,68 @@
 
   function closeNumber(result) {
     U.$('number').classList.add('hidden');
-    U.numberOpen = false;
+    /* ---------------- pick one of a list ----------------
+
+     For a setting with more answers than anybody wants to press through. The
+     language row is the reason it exists: ten of them, cycled one key at a
+     time, and overshooting means eight more presses in a language you may not
+     be able to read any more.
+
+     Keyed like the other overlays — keys.js checks U.pickOpen before it hands
+     anything to a view — so nothing underneath has to know it is up. */
+  U.pickOpen = false;
+  var pickCb = null, pickItems = [], pickIdx = 0;
+  var PICK_H = 78;
+
+  U.pick = function (title, items, current, cb) {
+    pickCb = cb;
+    pickItems = items || [];
+    pickIdx = 0;
+    for (var i = 0; i < pickItems.length; i++) {
+      if (pickItems[i].value === current) { pickIdx = i; break; }
+    }
+    U.$('picker-title').textContent = title;
+    var html = '';
+    for (var j = 0; j < pickItems.length; j++) {
+      html += '<div class="picker-row">' + U.esc(pickItems[j].label) + '</div>';
+    }
+    U.$('picker-list').innerHTML = html;
+    U.$('picker').classList.remove('hidden');
+    U.pickOpen = true;
+    paintPick();
+  };
+
+  function paintPick() {
+    var kids = U.$('picker-list').children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].className = 'picker-row' + (i === pickIdx ? ' focused' : '');
+    }
+    /* Keep the cursor in view without a scrollbar: the list is moved, the box
+       stays. Same trick as every other list in the app. */
+    var box = U.$('picker-scroll');
+    var h = (box && box.clientHeight) || 600;
+    var top = Math.max(0, (pickIdx + 1) * PICK_H - h);
+    if (pickIdx * PICK_H < top) top = pickIdx * PICK_H;
+    U.$('picker-list').style.transform = 'translateY(' + (-top) + 'px)';
+  }
+
+  U.pickKey = function (e) {
+    var a = e.action;
+    if (a === 'up')   { pickIdx = U.clamp(pickIdx - 1, 0, pickItems.length - 1); paintPick(); return true; }
+    if (a === 'down') { pickIdx = U.clamp(pickIdx + 1, 0, pickItems.length - 1); paintPick(); return true; }
+    if (a === 'ok')   { closePick(pickItems[pickIdx] ? pickItems[pickIdx].value : null); return true; }
+    if (a === 'back' || a === 'exit' || a === 'left') { closePick(null); return true; }
+    return true;
+  };
+
+  function closePick(value) {
+    U.$('picker').classList.add('hidden');
+    U.pickOpen = false;
+    var cb = pickCb; pickCb = null; pickItems = [];
+    if (cb) cb(value);
+  }
+
+  U.numberOpen = false;
     var cb = numCb; numCb = null; numBuf = '';
     numRaw = false; numMask = false;
     if (cb) cb(result);

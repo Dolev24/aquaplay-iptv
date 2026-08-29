@@ -34,8 +34,15 @@
   /* ---------------- boot ---------------- */
   A.boot = function () {
     Store.init();
+    /* Before anything draws. An empty setting means "whatever the TV is set
+       to", which is right far more often than English is. */
+    I18N.set(Store.settings().lang || I18N.detect());
     U.applyTheme();
-    if (U.isTizen) document.documentElement.classList.add('tizen');
+    /* A class per platform, so CSS can say "not in a browser" without
+       asking which TV. Nothing keys off 'android' yet; it is here because a
+       platform the stylesheet cannot name is a platform it cannot fix. */
+    document.documentElement.classList.add(U.platform);
+    if (U.isTV) document.documentElement.classList.add('tv');
     fitStage();
     w.addEventListener('resize', U.debounce(fitStage, 120), false);
 
@@ -91,11 +98,34 @@
     // Already watching it: the reminder has done its job without saying a word.
     if (Channels.playingKey() === r.chKey) return;
 
-    U.confirm(r.title + ' has started on ' + r.chName, function (yes) {
+    var about = describeReminder(r);
+    U.confirm(T('{title} has started on {name}', { title: r.title, name: r.chName }), function (yes) {
       if (!yes) return;
       A.goMain();
-      if (!Channels.tuneTo(r.chKey)) U.toast(r.chName + ' is no longer in this playlist');
-    }, { yes: 'Go to channel', no: 'Close' });
+      if (!Channels.tuneTo(r.chKey)) U.toast(T('{name} is no longer in this playlist', { name: r.chName }));
+    }, { yes: T('Go to channel'), no: T('Close'), desc: about.desc, logo: about.logo });
+  }
+
+  /* The guide as it stands now beats the guide as it stood when the reminder
+     was set — a refresh since then may carry a description this did not have.
+     What was stored is the fallback, not the source. */
+  function describeReminder(r) {
+    var out = { desc: r.desc || '', logo: r.logo || '' };
+    var live = sections.live;
+    var ch = null, i;
+    if (live && live.channels) {
+      for (i = 0; i < live.channels.length; i++) {
+        if (live.channels[i].key === r.chKey) { ch = live.channels[i]; break; }
+      }
+    }
+    if (ch && ch.logo) out.logo = ch.logo;
+    if (ch && EPG.hasData()) {
+      var list = EPG.list(ch);
+      for (i = 0; i < list.length; i++) {
+        if (list[i].s === r.start && list[i].d) { out.desc = list[i].d; break; }
+      }
+    }
+    return out;
   }
 
   /* Back to the browse screen from wherever the viewer happens to be. */
@@ -104,6 +134,7 @@
     SettingsView.hide();
     NumbersView.hide();
     ReplayView.hide();
+    CatalogView.hide();
     SeriesView.hide();
     route = 'main';
     Channels.show();
@@ -111,7 +142,7 @@
 
   /* hls.js is only needed for desktop testing — never shipped to the TV. */
   function loadHlsIfNeeded(done) {
-    if (U.isTizen) { done(); return; }
+    if (U.isTV) { done(); return; }
     var s = document.createElement('script');
     s.src = 'lib/hls.min.js';
     s.onload = done;
@@ -133,6 +164,7 @@
     if (route === 'settings')  return SettingsView.key(e);
     if (route === 'series')    return SeriesView.key(e);
     if (route === 'replay')    return ReplayView.key(e);
+    if (route === 'catalog')   return CatalogView.key(e);
     return Channels.key(e);
   }
 
@@ -147,7 +179,7 @@
   function loadProfile(p, forceNetwork, preloadText) {
     loadedProfileId = p.id;
     sections = { live: null, vod: null, series: null };
-    U.loader(true, 'Loading ' + (p.name || 'playlist') + '…');
+    U.loader(true, T('Loading {name}…', { name: p.name || T('playlist') }));
 
     var fromCache = forceNetwork
       ? Promise.resolve(null)
@@ -165,7 +197,7 @@
     }).then(function (data) {
       U.loader(false);
       if (!data.channels.length) {
-        U.toast('That playlist has no channels');
+        U.toast(T('That playlist has no channels'));
         route = 'setup'; Setup.show({ cancelable: true });
         return;
       }
@@ -191,7 +223,7 @@
       loadEpg(p, forceNetwork);
     }).catch(function (err) {
       U.loader(false);
-      U.toast(err && err.message ? err.message : 'Could not load the playlist');
+      U.toast(err && err.message ? err.message : T('Could not load the playlist'));
       route = 'setup';
       Setup.show({ cancelable: Store.profiles().length > 0 });
     });
@@ -220,14 +252,14 @@
       : Net.text(p.url, {
           timeout: 90000,
           onProgress: function (loaded, total) {
-            if (total) U.loaderProgress(loaded / total * 60, 'Downloading playlist…');
-            else U.loaderProgress(30, 'Downloading playlist… ' + Math.round(loaded / 1024) + ' KB');
+            if (total) U.loaderProgress(loaded / total * 60, T('Downloading playlist…'));
+            else U.loaderProgress(30, T('Downloading playlist…') + ' ' + Math.round(loaded / 1024) + ' KB');
           }
         });
 
     return got.then(function (text) {
       return M3U.parse(text, function (pct, n) {
-        U.loaderProgress(60 + pct * 0.4, 'Reading ' + n + ' channels…');
+        U.loaderProgress(60 + pct * 0.4, T('Reading {n} channels…', { n: n }));
       });
     }).then(function (res) {
       // A playlist may advertise its own guide; remember it if we have none.
@@ -249,7 +281,7 @@
 
     var noun = SECTION_NOUN[kind] || kind;
     var key = SECTION_CACHE_KEY[kind] + p.id;
-    U.loader(true, 'Loading ' + noun + '…');
+    U.loader(true, T('Loading {name}…', { name: noun }));
 
     Cache.get(key, CH_TTL).then(function (cached) {
       if (cached && cached.channels && cached.channels.length) return cached;
@@ -258,12 +290,12 @@
       return job.then(function (d) { Cache.set(key, d); return d; });
     }).then(function (d) {
       U.loader(false);
-      if (!d.channels.length) { U.toast('This playlist has no ' + noun); return; }
+      if (!d.channels.length) { U.toast(T('This playlist has no {name}', { name: noun })); return; }
       sections[kind] = d;
       Channels.setSection(kind, d);
     }).catch(function (err) {
       U.loader(false);
-      U.toast(err && err.message ? err.message : 'Could not load ' + noun);
+      U.toast(err && err.message ? err.message : T('Could not load {name}', { name: noun }));
     });
   };
 
@@ -275,6 +307,18 @@
 
   A.closeReplay = function () {
     ReplayView.hide();
+    route = 'main';
+    Channels.show();
+  };
+
+  A.enterCatalog = function () {
+    route = 'catalog';
+    Channels.hide();
+    CatalogView.show();
+  };
+
+  A.closeCatalog = function () {
+    CatalogView.hide();
     route = 'main';
     Channels.show();
   };
@@ -392,7 +436,7 @@
       // viewer's problem; only say so when it leaves them with nothing.
       if (!quiet) {
         A.epgError = msg;
-        U.toast('Guide unavailable — ' + msg);
+        U.toast(T('Guide unavailable — {why}', { why: msg }));
       }
       Channels.onEpgReady();
     });
@@ -406,13 +450,14 @@
     SettingsView.hide();
     SeriesView.hide();
     ReplayView.hide();
+    CatalogView.hide();
     Channels.hide();
     Setup.show({ cancelable: cancelable !== false });
   };
 
   A.closeSetup = function () {
     var p = Store.activeProfile();
-    if (!p) { U.toast('Add a playlist to continue'); return; }
+    if (!p) { U.toast(T('Add a playlist to continue')); return; }
     Setup.hide();
     if (loadedProfileId === p.id) { route = 'main'; Channels.show(); }
     else loadProfile(p);
@@ -430,7 +475,7 @@
     var p = Store.activeProfile();
     var live = sections.live;
     if (!p || !live || !live.channels || !live.channels.length) {
-      U.toast('No channels to number yet');
+      U.toast(T('No channels to number yet'));
       return;
     }
     route = 'numbers';
@@ -451,11 +496,20 @@
   /* A number moved, so the list has to re-sort under it. */
   A.onNumbersChanged = function () { Channels.reloadGroups(); };
 
+  /* Settings does not stop the channel. A television menu opens over what
+     you were watching and leaves it running, and stopping meant coming back
+     to a dead screen and waiting for the stream to open again — several
+     seconds, to change one row. The picture is hidden while the screen is
+     up (Channels.hide takes the video layer with it) and the sound carries
+     on, which is what a set-top box does.
+
+     It also makes the picture-size row honest: it applies to a player that
+     is actually running now, rather than to the next one to start. */
   A.openSettings = function () {
-    Player.stop();
     route = 'settings';
     SeriesView.hide();
     ReplayView.hide();
+    CatalogView.hide();
     Channels.hide();
     SettingsView.show();
   };
@@ -475,6 +529,7 @@
     SettingsView.hide();
     SeriesView.hide();
     ReplayView.hide();
+    CatalogView.hide();
     Cache.clearProfile(p.id).then(function () {
       EPG.clear();
       loadProfile(p, true);
@@ -493,8 +548,22 @@
 
     if (path === 'settings.pictureSize') { Player.applyPictureSize(); return; }
     if (path === 'settings.theme') { U.applyTheme(); return; }
+    /* Every string is drawn from the dictionary at paint time, so switching
+       language is: swap the dictionary, restamp the static markup, rebuild
+       whichever screen is up. */
+    if (path === 'settings.lang') {
+      I18N.set(Store.settings().lang || I18N.detect());
+      Channels.reloadGroups();
+      SettingsView.rebuild();
+      return;
+    }
     if (path === 'settings.altRows') { Channels.applyRowStyle(); return; }
+    if (path === 'settings.dateFormat' || path === 'settings.clock24') {
+      Channels.refreshClock();
+      return;
+    }
     if (path === 'settings.sortBy') { Channels.reloadGroups(); return; }
+    if (path === 'settings.guideView') { Channels.refreshGuide(); return; }
 
     if (GUIDE_SETTINGS[path]) {
       if (!Store.settings().epg) { EPG.clear(); Channels.onEpgReady(); return; }

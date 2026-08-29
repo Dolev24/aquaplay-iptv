@@ -34,6 +34,8 @@ It also runs unchanged in a desktop browser, so you can develop without a TV.
   600px channel list, 1040px player pane
 - Groups rail: All channels, Favourites, Recently watched, then the provider's own categories
 - Channel list with now/next from the guide and a progress bar
+- The bar along the bottom is the remote's legend: OK, full screen, **INFO for
+  what's on**, and the three colour buttons
 - Favourites (red button), search and settings from the foot of the groups
   rail, or the green and yellow buttons
 - The rail folds away when you leave it and slides back when you return, so the
@@ -41,19 +43,27 @@ It also runs unchanged in a desktop browser, so you can develop without a TV.
 - Lists wrap: up from the first channel is the last one, and back again — in
   the channel list and in the channel-numbers screen
 - Number keys jump straight to a channel number, and play it
+- Wound a channel back? While the info bar is up, **up** puts the cursor on the
+  red **Back to live** button next to the channel number and OK returns to the
+  live edge — the same two presses as the "stream is behind" badge
 
 **Guide viewer and catch-up**
 - Under the player: the focused channel's schedule — **nine programmes, five
-  on screen**: whatever is on air, four either side of it. The one on air sits
-  in the middle of the five; up and down scroll through the rest, and a slim
-  track on the right says where in the nine you are. Going further than that
-  is what the catch-up browser is for, so there is no setting for it
-- **INFO** steps into it (so does "What's on" in the channel panel), and there
+  on screen**. Out of the box it opens with **what is on at the top** and the
+  evening under it; up and down scroll through the rest, and a slim track on
+  the right says where in the nine you are. Going further than that is what
+  the catch-up browser is for
+- Settings -> **Guide panel** switches that to what is on in the **middle**
+  instead, with what has just been on above it — four either side, which is
+  the shape to pick for a channel you are half-watching
+- **INFO** steps into it (so does "Schedule" in the channel panel), and there
   OK does what that programme allows: replay one that has finished, watch the
   one on air, or **set a reminder** for one that has not started
 - A reminder pops up when the programme starts, wherever you are in the app,
   with **Go to channel** or **Close**. One that was missed — the TV was off —
   is dropped rather than arriving hours late
+- The popup carries the channel logo and the guide's description of the
+  programme, so it introduces the show rather than just naming it
 - When a channel has nothing on air, the panel head says why rather than
   leaving a column of finished programmes unexplained: **Guide ends 14:26**,
   **Starts 15:56**, or **Nothing on air** for a gap between programmes
@@ -135,15 +145,40 @@ It also runs unchanged in a desktop browser, so you can develop without a TV.
 - Programme guide on/off, catch-up history, and a **guide time offset** for
   providers whose XMLTV is in the wrong timezone
 - 24-hour or 12-hour clock, sort order, info bar duration, resume last channel
+- Every settings row is bold; **Playlist, Language and Theme** are larger
+  again, because they are what people open Settings for
+- **Language** opens a list rather than cycling through ten of them one press
+  at a time — and Back leaves it as it was
+- **Date format**: six ways to write the date over the channel list, each row
+  showing today written that way rather than naming a convention
 - Parental control and PIN, start-on list, arrow-key channel change
 - Restart application, clear cached data, reset channel numbers, remove playlist
 
 
 **Readable from a sofa**
+- The head of the channel list is a **clock**: the time and date lead, and the
+  name of the list sits under them
+- The groups rail is headed by the **AquaPlay wordmark** rather than the
+  playlist's name — the name is in the drawer's foot, where it is actually a
+  question worth answering
+- The channel list is **ten rows to a screen**: a 92px row with a 96x70 logo,
+  a 34px number, and the channel name in semibold above the programme line
+- The channel playing is **outlined in red** in the list, so it is findable
+  while you browse past it — it was a dot at the edge of the row
 - Channel numbers, channel names and the now/next line are all a size up and a
-  contrast step up from where they started, and the guide panel reads outward
-  from the middle: the programme on air is the largest thing in it, the one
-  either side of it a size down, the rest smaller again
+  contrast step up from where they started. In the guide panel the programme on
+  air is the largest thing and everything else is one size, which is easier to
+  read down than the three sizes it had before
+- The light theme is a mid grey-blue, not paper: a television is a lamp, and
+  the point of the setting is a room with the lights on, not a white page
+
+
+**Languages**
+- English, Español, Français, Deutsch, Português, Italiano, Русский, हिन्दी,
+  日本語, 한국어 — Settings -> Language, switched live, no reload. The default
+  follows the TV's own language setting
+- The whole interface moves: menus, settings, toasts, error messages, day and
+  month names, the guide panel and the setup screen
 
 **Parental control**
 - **Lock any channel by hand**: right arrow on it -> *Lock with PIN*. It asks
@@ -162,17 +197,28 @@ It also runs unchanged in a desktop browser, so you can develop without a TV.
 - Settings counts what is locked, and can take every lock off at once
 
 **Getting around**
-- **Left from the groups rail** opens a drawer: search, favourites, recently
-  watched, catch-up, settings, reload, and exit
+- **Left from the groups rail** opens a drawer: search, **TV catalogue**,
+  catch-up, settings, reload, and exit. Favourites and recently watched are not
+  in it — they are the first two rows of the rail you just came through
+- The **TV catalogue** is every channel down the left and the whole schedule
+  of the one you pick down the right, broken up by day and running as far ahead
+  as the guide reaches. It opens on whatever you are watching. OK watches a
+  programme if it is on, replays it if the provider kept it, and reminds you if
+  it has not started
 - Settings chooses which list the app opens on, and whether up/down change
   channel while watching fullscreen
+- Opening Settings **does not stop the channel** — the sound carries on and the
+  picture comes straight back, the way a television menu behaves
 
 **Channel numbers you can change** (Settings -> Channel numbers)
 - A screen of its own: every channel, its number, and a marker on the ones you
   have changed. OK opens a numeric editor: type a new number,
   OK saves, red clears it back to the playlist's own
+- Typing the original number back in counts as putting it back, not as another
+  change: the marker goes, and there is nothing left for Reset to undo
 - The override is what the list shows and what the number keys dial
-- Settings → Sort channels switches between provider order and channel number
+- Settings → Sort channels switches between channel number, which is what the
+  app starts on, and the provider's own order
 - Stored per playlist on the device; the M3U file is never modified
 
 **Performance choices that matter on a TV**
@@ -318,7 +364,33 @@ lib/hls.min.js        Browser-only; deliberately excluded from the .wgt
 ```
 
 The TV package contains only `index.html`, `config.xml`, `icon.png`, `css/`
-and `js/`: 22 files, 332 KB of plain source, 105 KB zipped.
+and `js/`. The nine dictionaries (176 KB) are the largest thing in it.
+
+### Icons
+
+Samsung asks for four, and they are not the same shape:
+
+| file | size | depth | what it is |
+| --- | --- | --- | --- |
+| `icon.png` | 512x423 | 24-bit | the application icon, the one in the .wgt |
+| `../branding/testing-icon-117x117.png` | 117x117 | 24-bit | side-loading for testing |
+| `../branding/banner-background-1920x1080.png` | 1920x1080 | 24-bit | large logo, underneath |
+| `../branding/banner-logo-1920x1080.png` | 1920x1080 | 32-bit | large logo, the wordmark |
+
+Each under 300 KB. Note the first one: a TV tile is wider than it is tall, so
+the application icon is **not square** — a square one gets letterboxed.
+
+```bash
+npm run icons
+```
+
+builds all four from `tools/icon-source.jpg`, which is the artwork at full size
+and the only thing they come from. Replace that file and re-run to change the
+icon. `node tools/make-icon.js --check` says whether what is on disk still fits
+the table above, and `npm run test:units` asserts it too.
+
+Only `icon.png` is packaged; `branding/` is for the Seller Office submission
+form.
 
 ---
 
@@ -331,9 +403,9 @@ npm test
 Or individually:
 
 ```bash
-node tools/test-units.js     # 271 parser tests, no browser, no dependencies
+node tools/test-units.js     # 287 parser tests, no browser, no dependencies
 node tools/test-proxy.js     # 20 proxy and range tests, no browser either
-node tools/e2e.js            # 345 browser tests: list, playback, guide, catch-up
+node tools/e2e.js            # 370 browser tests: list, playback, guide, catch-up
 node tools/e2e-vod.js        # 57 browser tests: Movies, Series, episodes
 node tools/e2e.js --headed   # same, but watch it happen
 ```
@@ -370,9 +442,16 @@ structured so each drops in without rework:
 - **PIN-locked groups** — whole categories rather than one channel at a time
 - **Picture-in-picture, multi-view**
 
-## Porting to Android TV later
+## Android TV
 
-The app is a web app, so the cheapest path is a WebView shell (or Capacitor).
-Only `js/player.js` and `js/keys.js` touch platform APIs: swap AVPlay for
-ExoPlayer through a JS bridge and map Android key codes into the same action
-vocabulary. Nothing else needs to change.
+Done, and it went the way this section used to predict: `../android` is a
+Kotlin shell — a WebView, ExoPlayer on a surface behind it, and a key map —
+that carries this same app. `js/player.js`, `js/keys.js` and `js/net.js` were
+the only files that touched a platform, and nothing else changed.
+
+The web app is not copied there. Gradle stages `index.html`, `css/` and `js/`
+into the APK on every build, so one copy of the app runs on both televisions
+and one set of tests covers it.
+
+See `../android/README.md` for what it takes to build, and ARCHITECTURE.md for
+why the shell is shaped the way it is.

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IPTV providers are overwhelmingly plain http, and Android has blocked
+     cleartext by default since Pie. Refusing it here would mean the app simply
+     could not reach most playlists, which is not a security posture, it is a
+     broken app. TLS is used wherever the provider offers it. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
