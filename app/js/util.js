@@ -154,7 +154,11 @@
      question — it is "go to channel" or "close" — and the dialog machinery is
      the same either way, so it takes labels rather than being copied. */
   U.confirm = function (text, cb, opts) {
-    confirmCb = cb; confirmSel = 1;
+    /* Starting on No. Every question asked through here is one where yes
+       costs something — leaving the app, forgetting a playlist, putting the
+       settings back — and the safe answer should be the one already under the
+       cursor. */
+    confirmCb = cb; confirmSel = 0;
     U.$('confirm-text').textContent = text;
     /* A logo and a description, for the caller that has them. Hidden rather
        than emptied: an empty element still takes its margins with it. */
@@ -165,7 +169,13 @@
     desc.textContent = (opts && opts.desc) || '';
     desc.classList.toggle('hidden', !(opts && opts.desc));
     U.$('confirm-yes').textContent = (opts && opts.yes) || T('Yes');
-    U.$('confirm-no').textContent = (opts && opts.no) || T('No');
+    /* An empty "no" means there is nothing to decline: About and its like are
+       notices, and a notice with two buttons asks a question it does not
+       have. The cursor goes to the only answer there is. */
+    var noText = (opts && opts.no === '') ? '' : ((opts && opts.no) || T('No'));
+    U.$('confirm-no').textContent = noText;
+    U.$('confirm-no').classList.toggle('hidden', noText === '');
+    if (noText === '') confirmSel = 1;
     U.$('confirm').classList.remove('hidden');
     U.confirmOpen = true;
     paintConfirm();
@@ -200,7 +210,7 @@
     ['Full screen, anywhere', 'P - whatever is playing, wherever the cursor is'],
     ['Back',               'Esc'],
     ['Channel +/-',        'Page Up / Page Down'],
-    ['Favourite',          'R', 'red'],
+    ['Favorite',          'R', 'red'],
     ['Search',             'G', 'green'],
     ['Reload the playlist','B', 'blue'],
     ['Settings',           'Y', 'yellow'],
@@ -210,7 +220,7 @@
     ['Menu',              'Left from the groups rail'],
     ['Rewind / forward',   'Left / Right in fullscreen'],
     ['Jump 5 minutes',     'J / L'],
-    ['Replay a programme', 'Enter on one marked in the guide'],
+    ['Replay a program', 'Enter on one marked in the guide'],
     ['Jump to a channel',  '0 - 9'],
     ['This list',          'H']
   ];
@@ -242,8 +252,6 @@
     return true;
   };
 
-  /* Numeric entry. Digits type, Back deletes (and closes when empty), OK
-     confirms. cb(number|null) — null means cancelled, 0 means "clear it". */
   /* ---------------- pick one of a list ----------------
 
      For a setting with more answers than anybody wants to press through. The
@@ -253,12 +261,29 @@
 
      Keyed like the other overlays — keys.js checks U.pickOpen before it hands
      anything to a view — so nothing underneath has to know it is up. */
+  /* How much list there is, and where in it you are.
+
+     Called by anything that scrolls a long child inside a short box by moving
+     it. Percentages of the content, so the track does not care how tall it is
+     itself. The box is marked 'scrolls' only when there is more than a row's
+     worth hidden — a thumb that fills its track says nothing. */
+  U.vtrack = function (box, thumb, total, view, top) {
+    if (!box || !thumb) return;
+    var more = total > view + 1;
+    box.classList.toggle('scrolls', more);
+    if (!more) return;
+    var frac = view / total;
+    thumb.style.height = Math.max(10, frac * 100) + '%';
+    thumb.style.top = U.clamp((top / total) * 100, 0, Math.max(0, 100 - frac * 100)) + '%';
+  };
+
   U.pickOpen = false;
-  var pickCb = null, pickItems = [], pickIdx = 0;
+  var pickCb = null, pickItems = [], pickIdx = 0, pickCurrent = null;
   var PICK_H = 78;
 
   U.pick = function (title, items, current, cb) {
     pickCb = cb;
+    pickCurrent = current;
     pickItems = items || [];
     pickIdx = 0;
     for (var i = 0; i < pickItems.length; i++) {
@@ -267,7 +292,16 @@
     U.$('picker-title').textContent = title;
     var html = '';
     for (var j = 0; j < pickItems.length; j++) {
-      html += '<div class="picker-row">' + U.esc(pickItems[j].label) + '</div>';
+      var it = pickItems[j];
+      /* `current` gets a tick, and an item can ask to be set apart from the
+         list it is at the bottom of — "add another" is not one of the things
+         being chosen between. */
+      html += '<div class="picker-row' +
+                (it.value === current ? ' current' : '') +
+                (it.apart ? ' apart' : '') + '">' +
+                U.esc(it.label) +
+                (it.value === current ? '<i class="picker-tick"></i>' : '') +
+              '</div>';
     }
     U.$('picker-list').innerHTML = html;
     U.$('picker').classList.remove('hidden');
@@ -276,6 +310,7 @@
   };
 
   function paintPick() {
+    var current = pickCurrent;
     var kids = U.$('picker-list').children;
     for (var i = 0; i < kids.length; i++) {
       kids[i].className = 'picker-row' + (i === pickIdx ? ' focused' : '');
@@ -287,6 +322,7 @@
     var top = Math.max(0, (pickIdx + 1) * PICK_H - h);
     if (pickIdx * PICK_H < top) top = pickIdx * PICK_H;
     U.$('picker-list').style.transform = 'translateY(' + (-top) + 'px)';
+    U.vtrack(box, U.$('pick-thumb'), pickItems.length * PICK_H, h, top);
   }
 
   U.pickKey = function (e) {
@@ -305,6 +341,8 @@
     if (cb) cb(value);
   }
 
+  /* Numeric entry. Digits type, Back deletes (and closes when empty), OK
+     confirms. cb(number|null) — null means cancelled, 0 means "clear it". */
   U.numberOpen = false;
   var numCb = null, numBuf = '', numMax = 4, numRaw = false, numMask = false, numAuto = 0;
 
@@ -361,68 +399,7 @@
 
   function closeNumber(result) {
     U.$('number').classList.add('hidden');
-    /* ---------------- pick one of a list ----------------
-
-     For a setting with more answers than anybody wants to press through. The
-     language row is the reason it exists: ten of them, cycled one key at a
-     time, and overshooting means eight more presses in a language you may not
-     be able to read any more.
-
-     Keyed like the other overlays — keys.js checks U.pickOpen before it hands
-     anything to a view — so nothing underneath has to know it is up. */
-  U.pickOpen = false;
-  var pickCb = null, pickItems = [], pickIdx = 0;
-  var PICK_H = 78;
-
-  U.pick = function (title, items, current, cb) {
-    pickCb = cb;
-    pickItems = items || [];
-    pickIdx = 0;
-    for (var i = 0; i < pickItems.length; i++) {
-      if (pickItems[i].value === current) { pickIdx = i; break; }
-    }
-    U.$('picker-title').textContent = title;
-    var html = '';
-    for (var j = 0; j < pickItems.length; j++) {
-      html += '<div class="picker-row">' + U.esc(pickItems[j].label) + '</div>';
-    }
-    U.$('picker-list').innerHTML = html;
-    U.$('picker').classList.remove('hidden');
-    U.pickOpen = true;
-    paintPick();
-  };
-
-  function paintPick() {
-    var kids = U.$('picker-list').children;
-    for (var i = 0; i < kids.length; i++) {
-      kids[i].className = 'picker-row' + (i === pickIdx ? ' focused' : '');
-    }
-    /* Keep the cursor in view without a scrollbar: the list is moved, the box
-       stays. Same trick as every other list in the app. */
-    var box = U.$('picker-scroll');
-    var h = (box && box.clientHeight) || 600;
-    var top = Math.max(0, (pickIdx + 1) * PICK_H - h);
-    if (pickIdx * PICK_H < top) top = pickIdx * PICK_H;
-    U.$('picker-list').style.transform = 'translateY(' + (-top) + 'px)';
-  }
-
-  U.pickKey = function (e) {
-    var a = e.action;
-    if (a === 'up')   { pickIdx = U.clamp(pickIdx - 1, 0, pickItems.length - 1); paintPick(); return true; }
-    if (a === 'down') { pickIdx = U.clamp(pickIdx + 1, 0, pickItems.length - 1); paintPick(); return true; }
-    if (a === 'ok')   { closePick(pickItems[pickIdx] ? pickItems[pickIdx].value : null); return true; }
-    if (a === 'back' || a === 'exit' || a === 'left') { closePick(null); return true; }
-    return true;
-  };
-
-  function closePick(value) {
-    U.$('picker').classList.add('hidden');
-    U.pickOpen = false;
-    var cb = pickCb; pickCb = null; pickItems = [];
-    if (cb) cb(value);
-  }
-
-  U.numberOpen = false;
+    U.numberOpen = false;
     var cb = numCb; numCb = null; numBuf = '';
     numRaw = false; numMask = false;
     if (cb) cb(result);
@@ -462,8 +439,18 @@
   };
 
   /* Case/diacritic-insensitive-ish search key */
+  /* Punctuation out, everything else kept.
+
+     This used to keep [a-z0-9] and drop the rest, which meant a Hebrew or
+     Russian or Japanese title became an empty string and could not be
+     searched for — nor could anything typed in those alphabets, since the
+     query went through the same mill. Channel names are Latin on most
+     playlists even when nothing else is, so it took searching programmes to
+     notice. Chromium 56 has no \p{L} to ask "is this a letter", hence a
+     list of what to remove rather than a list of what to keep. */
+  var PUNCT = /[\s\-_.,:;!?'"()\[\]{}\/\\|+*&^%$#@~`<>=\u2010-\u2027\u2030-\u205e]+/g;
   U.searchKey = function (s) {
-    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    return String(s || '').toLowerCase().replace(PUNCT, ' ').trim();
   };
 
   /* Providers label adult content in the group or the name, with no standard

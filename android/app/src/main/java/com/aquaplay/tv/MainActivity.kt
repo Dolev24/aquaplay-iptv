@@ -11,6 +11,7 @@ import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -19,7 +20,13 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewFeature
 
 /**
  * The shell.
@@ -55,6 +62,12 @@ class MainActivity : Activity() {
      *  Nothing is fetched over the network to serve it. */
     private lateinit var assetLoader: WebViewAssetLoader
 
+    /** Whether the on-screen keyboard is up, so its closing can be noticed. */
+    private var imeUp = false
+    private var imeHeight = 0
+    private var imeUpSent = false
+    private lateinit var root: FrameLayout
+
     private val debuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
@@ -65,7 +78,7 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         goImmersive()
 
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(MATCH, MATCH)
             setBackgroundColor(Color.BLACK)
         }
@@ -88,12 +101,38 @@ class MainActivity : Activity() {
         root.addView(web)
         setContentView(root)
 
+        /* The keyboard owns the remote while it is up, so the page cannot see
+           it close and would sit in its editing state for ever — every press
+           after that going to a keyboard that is no longer there. Watching the
+           IME's own insets is the only way to find out. */
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val up = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (imeUp && !up) {
+                Log.i(TAG, "keyboard closed")
+                send("window.AquaPlayShell&&AquaPlayShell.imeClosed&&AquaPlayShell.imeClosed()")
+            }
+            imeUp = up
+
+            /* And how tall it is. The window is adjustNothing — deliberately,
+               because a resize would change the stage scale and the whole
+               point of that scale is that it does not move — so the keyboard
+               is painted straight over the page and the page has no way to
+               know. Told the height, it can raise itself out from under. */
+            val h = if (up) insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+            if (h != imeHeight) {
+                imeHeight = h
+                /* Measured in one place, below. */
+                reportIme()
+            }
+            insets
+        }
+
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(APP_DOMAIN)
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
-        net = NetBridge()
+        net = NetBridge(cacheDir)
         player = PlayerBridge(this, surface) { kind, detail -> emit(kind, detail) }
 
         configure(web.settings)
@@ -109,8 +148,16 @@ class MainActivity : Activity() {
     private fun configure(s: WebSettings) {
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
-        s.loadWithOverviewMode = false
-        s.useWideViewPort = false
+        /* The page declares <meta viewport width=1920> and every coordinate
+           in it is a pixel of that 1920. These two make the WebView honour
+           that: a 1920-wide layout viewport, scaled once to fit the panel.
+
+           With them off, the WebView laid the page out 1920 CSS pixels wide
+           and still reported a device pixel ratio of 2 — 3840 device pixels
+           of page on a 1920 pixel screen, so a quarter of the app filled the
+           television and the rest was off the edge. */
+        s.loadWithOverviewMode = true
+        s.useWideViewPort = true
         s.builtInZoomControls = false
         s.displayZoomControls = false
         s.setSupportZoom(false)
@@ -121,6 +168,19 @@ class MainActivity : Activity() {
            blocked before it ever got that far. */
         s.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         s.allowFileAccess = false
+
+        /* No algorithmic darkening. The page is already dark when it means to
+           be and light when the viewer asks for that, and a WebView that
+           decides to help produces colours the Samsung build does not — which
+           is exactly the sort of difference nobody can explain from a sofa.
+           Measured on the emulator the colours already match; this is so they
+           still match on hardware whose WebView defaults differ. */
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(s, false)
+        } else if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+            @Suppress("DEPRECATION")
+            WebSettingsCompat.setForceDark(s, WebSettingsCompat.FORCE_DARK_OFF)
+        }
         s.allowContentAccess = false
     }
 
@@ -154,7 +214,18 @@ class MainActivity : Activity() {
             return net.fetch(url.toString(), request.requestHeaders)
         }
 
-        override fun onPageFinished(view: WebView, url: String) = goImmersive()
+        override fun onPageFinished(view: WebView, url: String) {
+            goImmersive()
+            /* One line that settles "what does the page think the screen is",
+               which is the question behind every report of the app being the
+               wrong size. */
+            view.evaluateJavascript(
+                "JSON.stringify({vw:innerWidth,vh:innerHeight,dpr:devicePixelRatio," +
+                    "platform:(window.U&&U.platform)||'?',bridge:!!window.AquaPlayNative})"
+            ) { r -> Log.i(TAG, "page viewport: $r") }
+            val dm = resources.displayMetrics
+            Log.i(TAG, "screen: ${dm.widthPixels}x${dm.heightPixels} density ${dm.density}")
+        }
     }
 
     private fun chrome() = object : WebChromeClient() {
@@ -215,6 +286,74 @@ class MainActivity : Activity() {
 
     fun exitApp() = runOnUiThread { finish() }
 
+    /**
+     * Show or hide the on-screen keyboard, because the page asked.
+     *
+     * The WebView will open one by itself when an input takes focus and then
+     * leave it up, at which point it owns the D-pad and the page's own cursor
+     * has stopped meaning anything. Saying so explicitly is the only way the
+     * two agree about which of them the remote is talking to.
+     */
+    fun setEditing(on: Boolean) = runOnUiThread {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager ?: return@runOnUiThread
+        if (on) {
+            /* No requestFocus() here. The WebView already has window focus —
+               the page is what put the cursor in the field — and asking for it
+               again resets the DOM focus to whatever the WebView considers its
+               first focusable node. Measured: activeElement went from the input
+               to #video-layer, so every keystroke afterwards went nowhere and
+               the field stayed empty. */
+            imm.showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
+        } else {
+            imm.hideSoftInputFromWindow(web.windowToken, 0)
+        }
+        Log.i(TAG, "editing " + (if (on) "on" else "off"))
+        watchIme()
+    }
+
+    /* ---------------------------------------------------------------------
+       The keyboard, and how much of the screen it is standing on
+
+       The window is declared adjustNothing — deliberately, because a resize
+       would change the page's stage scale and the whole point of that scale
+       is that it never moves. The cost is that nothing is dispatched when
+       the keyboard opens: the insets listener is never called for it, which
+       is what adjustNothing means and what the logcat showed.
+
+       The insets are still there to be read. So read them when the page says
+       it has started editing, several times, because the keyboard animates
+       in and the first look catches it at nothing.
+
+       The window height goes across with the height. The page cannot convert
+       these pixels into its own — devicePixelRatio does not do it, it reads
+       2 on a set whose CSS viewport is 1:1 with its screen — but a fraction
+       of the window is the same number in anybody's pixels.
+       --------------------------------------------------------------------- */
+
+    private fun reportIme() {
+        if (!::root.isInitialized) return
+        val ins = ViewCompat.getRootWindowInsets(root) ?: return
+        val up = ins.isVisible(WindowInsetsCompat.Type.ime())
+        /* Zero on a television, every time — see the note above. Sent
+           anyway, because a platform that does report it should be
+           believed over a rule of thumb. */
+        val h = if (up) ins.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+        if (up == imeUpSent && h == imeHeight) return
+        imeUpSent = up
+        imeHeight = h
+        val win = root.height
+        Log.i(TAG, "keyboard up=$up ${h}px of ${win}px")
+        send("window.AquaPlayShell&&AquaPlayShell.ime&&" +
+             "AquaPlayShell.ime(${if (up) 1 else 0},$h,$win)")
+    }
+
+    private fun watchIme() {
+        if (!::root.isInitialized) return
+        for (d in longArrayOf(120L, 300L, 550L, 900L, 1400L)) {
+            root.postDelayed({ reportIme() }, d)
+        }
+    }
+
     /* ---------------------------------------------------------------------
        Housekeeping
        --------------------------------------------------------------------- */
@@ -238,15 +377,23 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
+    /* Immersive through the controller rather than through
+       systemUiVisibility, and the window fitting its own insets rather than
+       the decor fitting them for it.
+
+       Same picture, but SYSTEM_UI_FLAG_FULLSCREEN is gone, and that flag was
+       quietly the whole keyboard problem: a window carrying it is never
+       resized for the IME — documented — and, laid out by the decor, is
+       never dispatched the IME insets either. Two ways of finding out where
+       the keyboard is, both switched off by one line, which is why the
+       insets listener sat silent through a keyboard the screenshot showed
+       covering half the page. */
     private fun goImmersive() {
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            )
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val bars = WindowInsetsControllerCompat(window, window.decorView)
+        bars.hide(WindowInsetsCompat.Type.systemBars())
+        bars.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
     companion object {

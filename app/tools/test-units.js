@@ -606,6 +606,18 @@ async function testSourceHygiene() {
   var markup = fs.readFileSync(path.join(ROOT, 'js/views/channels.js'), 'utf8');
   ok(markup.indexOf('class="epg-replay"') > -1,
      'and the guide gives a replayable programme that element');
+
+  /* Same rule for the key chips: the bar draws the Enter key rather than
+     printing a character for it, and it draws the one on the remote — a
+     box with a return arrow, not a ring with a dot. */
+  var okBlock = css.slice(css.indexOf('.k-ok{'));
+  okBlock = okBlock.slice(0, okBlock.indexOf('}') + 1);
+  ok(/mask-image\s*:\s*url\("data:image\/svg\+xml/.test(okBlock),
+     'the OK chip is the remote Enter key, drawn', okBlock.trim().slice(0, 80));
+  ok(okBlock.indexOf('%3Crect') > -1 && okBlock.indexOf('l2 2') > -1,
+     'a box with a return arrow in it, which is what the remote prints');
+  ok(/font-size\s*:\s*0/.test(okBlock),
+     'and the word OK stays in the markup without being painted');
 }
 
 /* ---------- run ---------- */
@@ -855,7 +867,7 @@ async function testIcons() {
   const REPO = path.resolve(ROOT, '..');
   const set = {
     icon: path.join(ROOT, 'icon.png'),
-    testing: path.join(REPO, 'branding/testing-icon-117x117.png'),
+    testing: path.join(REPO, 'branding/store-logo-512x423.png'),
     back: path.join(REPO, 'branding/banner-background-1920x1080.png'),
     logo: path.join(REPO, 'branding/banner-logo-1920x1080.png')
   };
@@ -867,13 +879,82 @@ async function testIcons() {
      the launcher letterboxes it, which is what this build shipped until the
      shapes were checked against the guidelines. */
   const icon = readPNG(set.icon);
-  eq([icon.w, icon.h], [512, 423], 'the application icon is 512 x 423, the shape of a TV tile');
+  /* Square, and one of them. The shape has been 512x512, 512x423 and 16:9,
+     and a pair declared with width and height attributes the way another
+     side-loaded package declares them — which is the arrangement that does
+     get a wide tile somewhere, but not on the set this is built for. The
+     tile never changed. So: one square icon, and the shape is not a knob.
+
+     512 and not the 117x117 the guidelines name: that one is the size a
+     local install wants on hand, and shipping only it left the set scaling
+     a 117px square up wherever it drew the icon larger. It came back
+     looking exactly as rough as that sounds. */
+  eq([icon.w, icon.h], [512, 512], 'the packaged icon is 512 square');
+  ok(icon.w === icon.h,
+     'square, so the set has nothing to stretch out of shape',
+     icon.w + 'x' + icon.h);
+
+  /* The wordmark's two lines are centred on each other, not merely inside
+     the same box.
+
+     "AQUA" sat dead centre and "PLAY >" sat 22px to the right of it, because
+     the play triangle extends the lower line and nothing put it back. The
+     bounding box of the two together was centred, so measuring the whole
+     mark said it was fine while looking at it said otherwise — which is
+     exactly how it was reported. */
+  const mark = readPNG(path.join(REPO, 'app/img/logo.png'), true);
+  /* readPNG hands back an at(x,y) rather than a raw buffer; the fourth
+     channel is the alpha, and 255 where the file has none. */
+  const inkAt = (x, y) => mark.at(x, y)[3];
+  const rowHasInk = [];
+  for (let y = 0; y < mark.h; y++) {
+    let any = false;
+    for (let x = 0; x < mark.w && !any; x++) if (inkAt(x, y) > 24) any = true;
+    rowHasInk.push(any);
+  }
+  const bands = [];
+  let from = -1;
+  for (let y = 0; y < mark.h; y++) {
+    if (rowHasInk[y] && from < 0) from = y;
+    else if (!rowHasInk[y] && from >= 0) { bands.push([from, y]); from = -1; }
+  }
+  if (from >= 0) bands.push([from, mark.h]);
+  const centres = bands.map(([y0, y1]) => {
+    let x0 = mark.w, x1 = -1;
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < mark.w; x++) {
+        if (inkAt(x, y) > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+      }
+    }
+    return (x0 + x1) / 2;
+  });
+  ok(bands.length >= 2, 'the wordmark is more than one line', String(bands.length));
+  const worst = Math.max.apply(null, centres.map(c => Math.abs(c - (mark.w - 1) / 2)));
+  ok(worst <= 2,
+     'and every line of it is centred on the same axis',
+     'worst line is ' + worst.toFixed(1) + 'px off centre: ' +
+     centres.map(c => c.toFixed(1)).join(', '));
+  ok(fs.statSync(set.icon).size < 300 * 1024,
+     'and still inside the 300 KB a Samsung package allows',
+     Math.round(fs.statSync(set.icon).size / 1024) + ' KB');
+
+  /* An Android TV banner in plain drawable/ is the mdpi bucket, and a 1080p
+     set is xhdpi — so one 320x180 file arrives on the home screen scaled up
+     by two, which is what "the icon is low quality" turned out to mean. */
+  const banners = ['drawable', 'drawable-xhdpi', 'drawable-xxhdpi'].map(function (d) {
+    return path.join(REPO, 'android/app/src/main/res', d, 'banner.png');
+  });
+  ok(banners.every(function (b) { return fs.existsSync(b); }),
+     'the TV banner is drawn for the densities a television runs at',
+     'drawable/ alone is mdpi, and a 1080p set is xhdpi');
+  const xhdpi = readPNG(banners[1]);
+  eq([xhdpi.w, xhdpi.h], [640, 360], 'the xhdpi banner is twice the base one');
   eq(icon.depth, 8, 'eight bits a sample');
   eq(icon.colour, 2, 'and no alpha channel: the guideline asks for 24-bit');
   ok(icon.kb < 300, 'under the 300 KB limit', icon.kb + ' KB');
 
   const small = readPNG(set.testing);
-  eq([small.w, small.h], [117, 117], 'the side-load testing icon is 117 square');
+  eq([small.w, small.h], [512, 423], 'the store logo is 512 x 423, the shape of a listing tile');
   eq(small.colour, 2, 'also 24-bit');
 
   const back = readPNG(set.back);
@@ -929,7 +1010,7 @@ async function testIcons() {
      it came from. Composed instead, the share is a number somebody chose.
 
      The height is not asserted. The wordmark is 3.1:1 and the tile is
-     1.21:1, so a mark that fills the width is 37% of the height and no
+     square, so a mark that fills the width is 31% of the height and no
      amount of wanting will move it — the empty band above and below is the
      shape of the artwork, not a mistake in the build. */
   const tile = readPNG(set.icon, true);
@@ -945,8 +1026,8 @@ async function testIcons() {
     }
   }
   const across = (tx1 - tx0 + 1) / tile.w;
-  ok(across > 0.88, 'the wordmark fills the width of the application icon',
-     Math.round(across * 100) + '% of 512px');
+  ok(across > 0.85, 'the wordmark fills the width of the application icon',
+     Math.round(across * 100) + '% of ' + tile.w + 'px');
   ok(across < 0.99, 'without running into the edge of it',
      Math.round(across * 100) + '%');
 
@@ -987,6 +1068,78 @@ async function testIcons() {
   /* The package points at the one that goes in it, and only that one. */
   const cfg = fs.readFileSync(path.join(ROOT, 'config.xml'), 'utf8');
   ok(cfg.indexOf('<icon src="icon.png"/>') > -1, 'config.xml names the application icon');
+
+  /* pack.js stages by name, so a file config.xml points at and pack.js has
+     never heard of is a broken package that builds cleanly. */
+  const packSrc = fs.readFileSync(path.join(ROOT, 'tools/pack.js'), 'utf8');
+  (cfg.match(/<icon src="([^"]+)"/g) || []).forEach(function (tag) {
+    const name = tag.match(/src="([^"]+)"/)[1];
+    ok(packSrc.indexOf("'" + name + "'") > -1,
+       'and pack.js puts ' + name + ' in the package');
+  });
+
+  /* The page shows which build it is, in the drawer's foot, and it has to
+     get that from somewhere: the Android package does not carry config.xml,
+     so app.js keeps a constant. Two places to bump is one place to forget —
+     unless something checks, which is this. */
+  const cfgVersion = (cfg.slice(cfg.indexOf('<widget'))
+    .match(/version="([0-9.]+)"/) || [, ''])[1];
+  const appVersion = (fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8')
+    .match(/A\.version\s*=\s*'([0-9.]+)'/) || [, ''])[1];
+  ok(cfgVersion.length > 0, 'config.xml carries a version', cfgVersion);
+  eq(appVersion, cfgVersion,
+     'and the version the app shows is that one');
+
+  /* And nowhere else. The settings screen had its own copy typed out by
+     hand and it had been wrong for ten releases — a version row is not read
+     often enough for anybody to notice it lying, which is the whole reason
+     it must not be written twice. */
+  /* A quoted string that is nothing but a version is one on its way to a
+     screen. Prose about 0.7.16 in a comment is history, not a second copy,
+     and app.js is where the one copy lives. */
+  const strays = ['js/views/settings.js', 'js/views/channels.js',
+                  'js/views/setup.js', 'index.html']
+    .map(f => ({ f, hits: (fs.readFileSync(path.join(ROOT, f), 'utf8')
+      .match(/['"]v?\d+\.\d+\.\d+['"]/g) || []) }))
+    .filter(x => x.hits.length);
+  eq(strays.map(x => x.f + ': ' + x.hits.join(',')), [],
+     'no screen writes out a version number of its own');
+
+  /* Menu icons are class names, not characters.
+
+     The renderer builds `ico-<name>` from whatever the row carries, so an
+     emoji there produces a class that matches no rule — and because the
+     element already has a background colour and gets its shape from a mask,
+     what appears is a solid 30px block. One row kept its emoji through the
+     changeover because it was written as a ternary rather than a literal,
+     and it shipped as a coloured square. */
+  const iconSrc = ['js/views/channels.js', 'js/views/catalog.js',
+                   'js/views/replay.js', 'js/views/series.js']
+    .filter(f => fs.existsSync(path.join(ROOT, f)))
+    .map(f => ({ f, text: fs.readFileSync(path.join(ROOT, f), 'utf8') }));
+  const badIcons = [];
+  iconSrc.forEach(({ f, text }) => {
+    const re = /icon:\s*([^,\n]+)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      /* Anything outside plain ASCII in an icon value is a character being
+         used where a name belongs. */
+      if (/[^\x00-\x7F]/.test(m[1])) badIcons.push(f + ': ' + m[1].trim());
+    }
+  });
+  eq(badIcons, [], 'every menu icon is a name, not a character');
+
+  /* And every name used is one the stylesheet actually draws. */
+  const cssIcons = (fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8')
+    .match(/\.ico-([a-z]+)\{/g) || []).map(x => x.slice(5, -1));
+  const used = [];
+  iconSrc.forEach(({ text }) => {
+    const re = /icon:\s*(?:[a-zA-Z]+\s*\?\s*)?'([a-z]+)'(?:\s*:\s*'([a-z]+)')?/g;
+    let m;
+    while ((m = re.exec(text))) { used.push(m[1]); if (m[2]) used.push(m[2]); }
+  });
+  eq(used.filter(n => cssIcons.indexOf(n) === -1), [],
+     'and one the stylesheet draws');
   const pack = fs.readFileSync(path.join(ROOT, 'tools/pack.js'), 'utf8');
   ok(pack.indexOf("'icon.png'") > -1, 'and the packer stages it');
   ok(pack.indexOf('branding') === -1,
@@ -1030,7 +1183,9 @@ function androidCtx(opts) {
     play: function (url, mode) { calls.push(['play', url, mode]); },
     stop: function () { calls.push(['stop']); },
     seekTo: function (ms) { calls.push(['seekTo', ms]); },
-    setRect: function (x, y, w, h) { calls.push(['setRect', x, y, w, h]); },
+    setRect: function (x, y, w, h, vw, vh) {
+      calls.push(['setRect', x, y, w, h, vw, vh]);
+    },
     setBuffer: function (p, r) { calls.push(['setBuffer', p, r]); },
     isPlaying: function () { return state.playing; },
     positionMs: function () { return state.position; },
@@ -1129,20 +1284,20 @@ async function testAndroidRect() {
   const a = androidCtx({ videoSize: '1440x1080' });     // 4:3
   a.Player.init();
   a.Player.play('http://p.tv/4x3.ts', 'full');
-  eq(a.last('setRect'), ['setRect', 240, 0, 1440, 1080],
+  eq(a.last('setRect'), ['setRect', 240, 0, 1440, 1080, 1920, 1080],
      'a 4:3 stream fullscreen is pillarboxed by the app');
 
   const wide = androidCtx({ videoSize: '1920x1080' });
   wide.Player.init();
   wide.Player.play('http://p.tv/16x9.ts', 'full');
-  eq(wide.last('setRect'), ['setRect', 0, 0, 1920, 1080],
+  eq(wide.last('setRect'), ['setRect', 0, 0, 1920, 1080, 1920, 1080],
      'a 16:9 one fills the screen');
 
   /* The preview box is the one in the CSS, and the same arithmetic applies. */
   const prev = androidCtx({ videoSize: '1920x1080' });
   prev.Player.init();
   prev.Player.play('http://p.tv/16x9.ts', 'preview');
-  eq(prev.last('setRect'), ['setRect', 880, 0, 1040, 585],
+  eq(prev.last('setRect'), ['setRect', 880, 0, 1040, 585, 1920, 1080],
      'and the preview lands on the frame the CSS drew');
 
   /* A window that is not 1920x1080 — the surface is placed in the window's
@@ -1151,37 +1306,40 @@ async function testAndroidRect() {
   const half = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540 });
   half.Player.init();
   half.Player.play('http://p.tv/16x9.ts', 'full');
-  eq(half.last('setRect'), ['setRect', 0, 0, 960, 540],
-     'a half-size window gets a half-size rectangle');
+  eq(half.last('setRect'), ['setRect', 0, 0, 960, 540, 960, 540],
+     'a half-size window gets a half-size rectangle, and says what it is of');
 
-  /* And the one that was actually wrong on a television.
+  /* And the part that was got wrong on a real television.
 
-     The page measures the window in CSS pixels, and on Android a CSS pixel is
-     a dp — so a 1080p set at xhdpi hands the page a 960x540 viewport. The
-     surface is laid out in device pixels. Sending it the CSS numbers put the
-     picture in the top-left quarter of the screen at half the size, which is
-     what somebody reported as the resolution being off, and is close enough
-     to "not playing" if you are looking at the middle of the screen. */
-  const tv = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540, dpr: 2 });
-  tv.Player.init();
-  tv.Player.play('http://p.tv/16x9.ts', 'full');
-  eq(tv.last('setRect'), ['setRect', 0, 0, 1920, 1080],
-     'a 1080p set at xhdpi fills the screen, in device pixels');
+     A CSS pixel is not a device pixel on Android, and nothing reliably says
+     what it is: the set this was tested on reports a 1920 viewport and a
+     device pixel ratio of 2, while that 1920 covers a 1920 pixel panel
+     exactly — the WebView folds its page scale in and still reports the
+     density. Converting by that ratio drew the picture at twice the size in
+     the corner of the screen.
 
-  /* The same conversion on a 4K set, where the density and the page scale
-     both differ and only the ratio between them is the right number. */
-  const uhd = androidCtx({ videoSize: '1920x1080', innerWidth: 960, innerHeight: 540, dpr: 4 });
-  uhd.Player.init();
-  uhd.Player.play('http://p.tv/16x9.ts', 'full');
-  eq(uhd.last('setRect'), ['setRect', 0, 0, 3840, 2160],
-     'and a 4K one does too');
+     So the page converts nothing. It sends its own numbers and the viewport
+     they are measured against, and the shell — which is the only thing that
+     knows how many real pixels its view is — does the division. These
+     assert that contract: whatever the ratio claims, the rect and the
+     viewport are in the same units as each other. */
+  [1, 2, 4].forEach(function (ratio) {
+    const c = androidCtx({
+      videoSize: '1920x1080', innerWidth: 960, innerHeight: 540, dpr: ratio
+    });
+    c.Player.init();
+    c.Player.play('http://p.tv/16x9.ts', 'full');
+    eq(c.last('setRect'), ['setRect', 0, 0, 960, 540, 960, 540],
+       'the rect is the page\'s own pixels whatever devicePixelRatio says (' +
+       ratio + 'x)');
+  });
 
-  /* The shape still comes from the app, whatever the pixels are called. */
+  /* The shape still comes from the app, in whatever those pixels are. */
   const pillar = androidCtx({ videoSize: '1440x1080', innerWidth: 960, innerHeight: 540, dpr: 2 });
   pillar.Player.init();
   pillar.Player.play('http://p.tv/4x3.ts', 'full');
-  eq(pillar.last('setRect'), ['setRect', 240, 0, 1440, 1080],
-     'a 4:3 stream is still pillarboxed by the app, in device pixels');
+  eq(pillar.last('setRect'), ['setRect', 120, 0, 720, 540, 960, 540],
+     'a 4:3 stream is still pillarboxed by the app');
 }
 
 async function testAndroidState() {
@@ -1382,6 +1540,120 @@ async function testAndroidProject() {
      'Android Lint fails a release build otherwise');
   ok(gradle.indexOf('opt-in=androidx.media3') === -1,
      'and the Kotlin opt-in flag is gone, since it did nothing but warn');
+
+  /* The one that made five channels out of eight unplayable while looking
+     exactly like a decoder fault. Broadcast H.264 frequently carries no IDR
+     frames at all — the encoder refreshes the picture gradually instead —
+     and a reader that waits for an IDR waits for good: the video track is
+     found, selected and reported supported, the audio plays, and no decoder
+     is ever created. Measured on a real playlist: those channels play with
+     this flag and do not without it. */
+  ok(bridge.indexOf('FLAG_ALLOW_NON_IDR_KEYFRAMES') > -1,
+     'the stream readers begin at the first usable picture, not at an IDR',
+     'without it a channel with no IDR frames plays sound over a black screen');
+  ok(bridge.indexOf('HlsMediaSource.Factory') > -1 &&
+     bridge.indexOf('setExtractorFactory') > -1,
+     'and HLS carries it too, which takes a media source of its own',
+     'DefaultMediaSourceFactory gives the HLS path no way to pass the flag');
+
+  /* A message that names a cause it has not established sends whoever reads
+     it looking in the wrong place. This one blamed interlaced video, which
+     was nothing to do with it, and that cost a release. */
+  const noPicture = (bridge.slice(bridge.indexOf('private val noPicture'))
+                           .match(/fail\("([^"]*)"/) || [, ''])[1];
+  ok(noPicture.length > 0, 'the no-picture watchdog says something', noPicture);
+  ok(!/interlaced|hardware decoder/i.test(noPicture),
+     'without naming a cause it has not shown', noPicture);
+
+  /* One stylesheet paints both builds, so both builds must show the same
+     colours. A WebView left to itself may decide a dark app wants its page
+     darkened for it — which would make the Android build differ from the
+     Samsung one for a reason nobody could see from a sofa. Measured on the
+     emulator the two match to the pixel; this is so they still match on
+     hardware whose WebView defaults are not the emulator's. */
+  ok(/ALGORITHMIC_DARKENING|FORCE_DARK/.test(activity),
+     'the shell turns the WebView\u2019s own darkening off',
+     'left on, Android renders colours the Samsung build does not');
+
+  /* A release build is a different thing from the debug one, and for a long
+     while it was not: every APK handed over was debuggable, which means the
+     WebView's contents can be attached to over adb by anyone who can reach
+     the box. That is exactly how this project drives the app in testing,
+     and exactly what should not ship. */
+  const relBlock = gradle.slice(gradle.indexOf('release {'),
+                                gradle.indexOf('debug {'));
+  ok(/isMinifyEnabled\s*=\s*true/.test(relBlock),
+     'the release build is shrunk', 'R8 off means the debug APK with a different name');
+  ok(/isShrinkResources\s*=\s*true/.test(relBlock),
+     'and its resources with it');
+
+  /* The one thing R8 must be told about. Every method on the bridge is
+     called by name from JavaScript and by nothing at all from Kotlin, so a
+     shrinker left to its own judgement removes the whole player and the app
+     boots to a screen that never plays anything. */
+  const rules = fs.readFileSync(
+    path.join(root, 'android/app/proguard-rules.pro'), 'utf8');
+  ok(/JavascriptInterface\s*<methods>/.test(rules),
+     'and it keeps the JavaScript bridge, which nothing in Kotlin calls',
+     'without this the release build shrinks the player away');
+
+  /* Debugging the page is a debug-build privilege. */
+  ok(/if \(debuggable\)\s*WebView\.setWebContentsDebuggingEnabled/.test(activity),
+     'and the page is only debuggable in a debuggable build',
+     'otherwise anyone on the network can attach to the app\u2019s WebView');
+
+  /* And the key that signs it is not in here. */
+  const agi = fs.readFileSync(path.join(root, 'android/.gitignore'), 'utf8');
+  ok(/keystore\.properties/.test(agi) && /\*\.jks/.test(agi),
+     'the signing key is excluded from the repository', agi.trim());
+
+  /* Every logo in a playlist is fetched through the shell, and a body handed
+     back from shouldInterceptRequest never reaches the WebView's own HTTP
+     cache — so without one here each logo was fetched from the provider
+     again every time its row scrolled back into view. Measured at 576ms
+     apiece, which is why a fast scroll left a column of blanks. */
+  const netBridge = fs.readFileSync(
+    path.join(root, 'android/app/src/main/java/com/aquaplay/tv/NetBridge.kt'), 'utf8');
+  ok(netBridge.indexOf('IMG_MAX') > -1 && netBridge.indexOf('cached(url)') > -1,
+     'the shell caches the images it fetches',
+     'without it every logo is re-downloaded each time it scrolls into view');
+  ok(/Cache-Control/.test(netBridge),
+     'and says so, so the WebView keeps them for the page as well');
+
+  /* Reading a layout property back mid-write forces the whole page to be
+     laid out again. In slideGuide that ran on every cursor move, and the
+     sampling profiler put it at 45% of a held key's time. It belongs on the
+     rare path where the transition is actually being switched. */
+  const chan = fs.readFileSync(path.join(root, 'app/js/views/channels.js'), 'utf8');
+  const slide = chan.slice(chan.indexOf('function slideGuide'),
+                           chan.indexOf('function slideGuide') + 600);
+  ok(slide.indexOf('offsetHeight') > -1,
+     'the guide still commits a transition switch before moving');
+  ok(/if \(!want\)[^\n]*\{[^\n]*offsetHeight|guideAnim/.test(slide),
+     'but only when the transition changes, not on every move',
+     'a forced layout per keypress is what made holding the key lag');
+
+  /* Showing the keyboard must not ask the WebView for focus.
+
+     Measured on a real Android TV: requestFocus() on the WebView resets the
+     DOM focus to whatever it considers its first focusable node — the video
+     layer, as it happens — so the field the page had just put the cursor in
+     lost it, and every keystroke after that went nowhere. The field stayed
+     empty and it looked like the keyboard was broken. */
+  const setEditing = activity.slice(activity.indexOf('fun setEditing'),
+                                    activity.indexOf('fun setEditing') + 700);
+  ok(setEditing.indexOf('showSoftInput') > -1, 'the shell shows the keyboard itself');
+  /* The call, not the word: the comment beside it explains why it is not
+     there, and a test that reads comments is a test that reads nothing. */
+  ok(setEditing.indexOf('web.requestFocus()') === -1,
+     'without taking focus off the field the page just focused',
+     'requestFocus there empties the field the viewer is typing into');
+
+  /* And it has to notice the keyboard closing, because while it is up it owns
+     the D-pad and the page cannot see the press that dismissed it. */
+  ok(activity.indexOf('WindowInsetsCompat.Type.ime()') > -1,
+     'and watches for the keyboard closing',
+     'without it the page stays in its editing state and the cursor never moves again');
 }
 
 async function testCap() {

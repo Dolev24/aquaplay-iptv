@@ -33,6 +33,12 @@ val webVersionCode: Int by lazy {
     major * 1_000_000 + minor * 10_000 + patch
 }
 
+/* Read before android{}, where `java` means Gradle's own extension rather
+   than the package and java.util.Properties does not resolve. */
+val keyProps = Properties()
+val keyFile = rootProject.file("keystore.properties")
+if (keyFile.exists()) keyFile.inputStream().use { keyProps.load(it) }
+
 android {
     namespace = "com.aquaplay.tv"
     compileSdk = 34
@@ -47,10 +53,40 @@ android {
         versionName = webVersion
     }
 
+    /* A release is signed with a key this repository does not contain and
+       must never contain. Put one in android/keystore.properties, which is
+       gitignored:
+
+           storeFile=C:/keys/aquaplay.jks
+           storePassword=...
+           keyAlias=aquaplay
+           keyPassword=...
+
+       Without that file the release build still runs and produces an unsigned
+       APK — which is what you want for checking that shrinking did not break
+       anything, and which no device will install until it is signed. */
+
+    signingConfigs {
+        if (keyProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(keyProps.getProperty("storeFile"))
+                storePassword = keyProps.getProperty("storePassword")
+                keyAlias = keyProps.getProperty("keyAlias")
+                keyPassword = keyProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            /* R8, with the rules in proguard-rules.pro. The one that matters
+               there is the JavaScript bridge: every method on it is reached by
+               name from the page and by nothing at all from Kotlin, so a
+               shrinker left to its own judgement removes the entire player. */
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
         }
         debug {
             applicationIdSuffix = ".debug"

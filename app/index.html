@@ -18,8 +18,12 @@
 
   <!-- ---------------- SETUP / ADD PLAYLIST ---------------- -->
   <section id="view-setup" class="view">
+    <!-- The wordmark over the heading, the way Settings does it. It was the
+         app's name set in letter-spaced capitals with a square beside it,
+         which is a logo drawn twice — once in CSS here and once in the PNG
+         everywhere else. -->
+    <span class="brand-logo setup-brand"></span>
     <div class="setup-wrap">
-      <div class="brand"><span class="brand-mark"></span>AquaPlay</div>
       <h1 id="setup-title" data-i18n="Add your playlist">Add your playlist</h1>
       <p class="setup-sub" data-i18n="Enter the details your IPTV provider gave you.">Enter the details your IPTV provider gave you.</p>
 
@@ -36,7 +40,7 @@
           </label>
           <label class="field">
             <span data-i18n="Server URL">Server URL</span>
-            <input class="focusable" type="url" id="x-host" placeholder="http://example.com:8080" autocomplete="off">
+            <input class="focusable" type="url" id="x-host" placeholder="http://your-provider.example:8080" autocomplete="off">
           </label>
           <label class="field">
             <span data-i18n="Username">Username</span>
@@ -55,11 +59,11 @@
           </label>
           <label class="field">
             <span data-i18n="M3U / M3U8 URL">M3U / M3U8 URL</span>
-            <input class="focusable" type="url" id="m-url" placeholder="http://example.com/get.php?..." autocomplete="off">
+            <input class="focusable" type="url" id="m-url" placeholder="http://your-provider.example/get.php?username=…&amp;password=…&amp;type=m3u_plus" autocomplete="off">
           </label>
           <label class="field">
             <span><span data-i18n="EPG (XMLTV) URL">EPG (XMLTV) URL</span> <em data-i18n="optional">optional</em></span>
-            <input class="focusable" type="url" id="m-epg" placeholder="http://example.com/xmltv.php?..." autocomplete="off">
+            <input class="focusable" type="url" id="m-epg" placeholder="http://your-provider.example/xmltv.php?username=…&amp;password=…" autocomplete="off">
           </label>
         </div>
 
@@ -97,7 +101,7 @@
            drawer, and reachable from anywhere; a third way in cost a row at
            the foot of every screen and one more stop for the cursor to pass
            through on its way to Settings. -->
-      <div class="rail-hint" id="rail-settings"><i class="hint-arrow"></i><span class="sliders"></span><span data-i18n="Settings">Settings</span></div>
+      <div class="rail-hint" id="rail-settings"><span class="sliders"></span><span data-i18n="Settings">Settings</span></div>
     </aside>
 
     <main id="channels">
@@ -122,14 +126,34 @@
       <!-- A legend for the remote, and nothing else: the PC keys that stand in
            for these while testing are listed by H instead of crowding the bar. -->
       <div class="action-bar">
-        <span class="act" data-act="play"><i class="k k-ok">OK</i><span data-i18n="Play">Play</span></span>
+        <span class="act-label" data-i18n="Shortcuts:">Shortcuts:</span>
+        <!-- No Enter here. It selects whatever the cursor is on, which is
+             true of every list on every screen; a shortcut is a key that
+             reaches something you could not otherwise get to from here. -->
         <span class="act" data-act="full"><i class="k k-play"></i><span data-i18n="Full screen">Full screen</span></span>
-        <span class="act" data-act="info"><i class="k k-info">INFO</i><span data-i18n="Schedule">Schedule</span></span>
-        <span class="act" data-act="fav"><i class="k k-red"></i><span data-i18n="Favourite">Favourite</span></span>
+        <!-- The two directions. They are the only things on this bar that
+             are an arrow rather than a button, which is why neither of them
+             was ever named on it. Left first, because that is the order they
+             sit in under a thumb. -->
+        <span class="act act-arrow" data-act="menu-left"><i class="k k-left"></i><span data-i18n="Main menu">Main menu</span></span>
+        <span class="act act-arrow" data-act="menu-right"><i class="k k-right"></i><span data-i18n="Channel menu">Channel menu</span></span>
+        <!-- The coloured four in the order they sit on the remote: red,
+             green, yellow, blue. A legend that lists them in some other
+             order makes somebody look down at their hand and back up. -->
+        <span class="act" data-act="fav"><i class="k k-red"></i><span data-i18n="Favorite">Favorite</span></span>
         <span class="act" data-act="search"><i class="k k-green"></i><span data-i18n="Search">Search</span></span>
         <span class="act" data-act="settings"><i class="k k-yellow"></i><span data-i18n="Settings">Settings</span></span>
+        <span class="act" data-act="info"><i class="k k-blue"></i><span data-i18n="Schedule">Schedule</span></span>
       </div>
     </main>
+
+    <!-- The screen continues in both directions, and says so. The left
+         sign says what left opens next, which changes: from the list it
+         is the folded rail, from inside the rail it is the drawer. One
+         of the two is up at a time. -->
+    <i class="edge edge-left edge-rail"></i>
+    <i class="edge edge-left edge-drawer"></i>
+    <i class="edge edge-right"></i>
 
     <aside id="preview">
       <!-- Full-bleed so the video has no opaque ancestor above it: on Tizen
@@ -144,7 +168,12 @@
 
       <div class="preview-body">
         <div class="preview-meta" id="preview-meta">
-          <div class="pm-name" id="pm-name"></div>
+          <!-- The logo and the channel it belongs to. What is on it is on
+               the line underneath, with the times. -->
+          <div class="pm-head">
+            <span class="pm-logo blank" id="pm-logo"></span>
+            <span class="pm-name" id="pm-name"></span>
+          </div>
           <!-- The float has to precede the text it wraps around. -->
           <div class="pm-now"><span class="pm-left" id="pm-left"></span><span
                class="pm-now-text" id="pm-now"></span></div>
@@ -168,8 +197,13 @@
        the right-hand edge. -->
   <div id="ctxmenu" class="hidden">
     <div class="cm-panel" id="cm-panel">
-      <div class="cm-head"><div class="cm-title" id="cm-title"></div>
-        <div class="cm-sub" id="cm-sub"></div></div>
+      <div class="cm-head">
+        <span class="cm-logo blank" id="cm-logo"></span>
+        <span class="cm-headings">
+          <div class="cm-title" id="cm-title"></div>
+          <div class="cm-sub" id="cm-sub"></div>
+        </span>
+      </div>
       <div id="cm-list"></div>
     </div>
   </div>
@@ -178,7 +212,7 @@
     <div class="sm-panel">
       <div class="sm-brand"><span class="brand-logo sm-logo"></span></div>
       <div id="sm-list"></div>
-      <div class="sm-foot" id="sm-foot"></div>
+      <div class="sm-foot"><span id="sm-foot-left"></span><span id="sm-foot-right"></span></div>
     </div>
   </div>
 
@@ -194,6 +228,7 @@
 
   <!-- ---------------- CATCH-UP BROWSER ---------------- -->
   <section id="view-replay" class="view hidden">
+    <i class="edge edge-left"></i>
     <aside class="rp-left">
       <div class="pane-head">
         <span class="pane-title" id="rp-channel">Channel</span>
@@ -215,9 +250,10 @@
   <!-- Times down the left, everything on at that time down the right. The
        guide panel is about one channel; this is about the evening. -->
   <section id="view-catalog" class="view hidden">
+    <i class="edge edge-left"></i>
     <aside class="cg-left">
       <div class="pane-head">
-        <span class="pane-title" data-i18n="TV catalogue">TV catalogue</span>
+        <span class="pane-title" data-i18n="TV catalog">TV catalog</span>
         <span class="count" id="cg-chan-count"></span>
       </div>
       <div class="cg-chans-box" id="cg-chans-box"><div id="cg-chans"></div></div>
@@ -228,6 +264,10 @@
         <span class="rp-title" id="cg-title"></span>
         <span class="count" id="cg-count"></span>
       </div>
+      <!-- The days this guide covers for this channel. Choosing one filters
+           the list under it, which beats scrolling past today to reach
+           tomorrow. -->
+      <div class="cg-days-box" id="cg-days-box"><div id="cg-days"></div></div>
       <div class="cg-scroller" id="cg-scroller"><div id="cg-progs"></div></div>
       <div class="rp-empty hidden" id="cg-empty" data-i18n="No guide for this channel">No guide for this channel</div>
     </main>
@@ -235,6 +275,7 @@
 
   <!-- ---------------- SERIES DETAIL ---------------- -->
   <section id="view-series" class="view hidden">
+    <i class="edge edge-left"></i>
     <aside class="sr-left">
       <div class="sr-poster" id="sr-poster"></div>
       <div class="rail-hint"><b>&#9664;</b> <span data-i18n="Back">Back</span></div>
@@ -286,8 +327,13 @@
       <div class="osd-logo" id="osd-logo"></div>
       <div class="osd-text">
         <div class="osd-num" id="osd-num"></div>
-        <b class="osd-back hidden" id="osd-back" data-i18n="Back to live">Back to live</b>
         <div class="osd-name" id="osd-name"></div>
+        <!-- "Back to live" sits on the right of the line above the progress
+             bar, beside how much of the programme is left. Outside #osd-now
+             rather than in it: that element is rewritten on every paint of
+             the bar, and anything inside it goes with it. A right float
+             before the line puts it at the end of that line all the same. -->
+        <b class="osd-back hidden" id="osd-back" data-i18n="Back to live">Back to live</b>
         <div class="osd-now" id="osd-now"><span class="osd-left" id="osd-left"></span></div>
         <div class="osd-bar"><i id="osd-bar-fill"></i></div>
         <div class="osd-desc" id="osd-desc"></div>
@@ -295,23 +341,62 @@
       </div>
       <div class="osd-clock" id="osd-clock"></div>
     </div>
+
+    <!-- What the remote does from here. The keys in fullscreen are not the
+         keys in the list — left and right wind the picture rather than
+         moving a cursor — and this is the one screen where the viewer is
+         looking at the picture instead of at a list that could explain
+         itself. Drawn chips, never glyphs: a television falls back to
+         whatever font it likes. -->
+    <div class="osd-keys">
+      <span class="act"><i class="k k-lr"></i><span data-i18n="Rewind / forward">Rewind / forward</span></span>
+      <span class="act" id="osd-k-chan"><i class="k k-ud"></i><span data-i18n="Channel">Channel</span></span>
+      <span class="act"><i class="k k-ok">OK</i><span data-i18n="Info">Info</span></span>
+      <span class="act"><i class="k k-red"></i><span data-i18n="Favorite">Favorite</span></span>
+      <span class="act"><i class="k k-back">BACK</i><span data-i18n="Back">Back</span></span>
+    </div>
   </div>
 
   <div id="zap" class="hidden"></div>
 
   <!-- ---------------- SETTINGS ---------------- -->
   <section id="view-settings" class="view hidden">
-    <!-- Top left, the same wordmark the rail head shows, so the two screens
-         are recognisably one app. -->
+    <!-- Left goes back to the menu, and says so. -->
+    <i class="edge edge-left"></i>
+    <!-- Over the heading, centred with everything else. The same wordmark
+         the rail head shows, so the two screens are recognisably one app. -->
     <span class="brand-logo set-brand"></span>
     <div class="settings-wrap">
       <h1 data-i18n="Settings">Settings</h1>
-      <div id="settings-list"></div>
+      <div id="settings-list"><div id="settings-inner"></div><i class="vtrack"><b id="settings-thumb"></b></i></div>
+      <i class="more-below" id="settings-more"></i>
     </div>
-    <!-- And a large one in the space to the right of the rows, which was empty
-         and is the only place on the screen with room for it. -->
-    <span class="brand-logo set-brand-big"></span>
   </section>
+
+  <!-- A newer build exists. Said once a day, above everything, and gone on
+       its own — the app cannot install it, so there is nothing to decide. -->
+  <div id="update-note" class="hidden"><span class="ico ico-reload"></span><span id="update-text"></span></div>
+
+  <!-- Search, asked and answered in one place. -->
+  <div id="find" class="hidden">
+    <div class="find-box">
+      <div class="find-head">
+        <span class="ico ico-search"></span>
+        <input class="focusable" id="find-input" type="text"
+               data-i18n-ph="Search channels and programs"
+               placeholder="Search channels and programs" autocomplete="off">
+      </div>
+      <div class="find-scroll" id="find-scroll">
+        <div id="find-list"></div>
+        <i class="vtrack"><b id="find-thumb"></b></i>
+      </div>
+      <div class="find-empty" id="find-empty" data-i18n="Type to search">Type to search</div>
+      <div class="find-foot">
+        <span><i class="k k-ok">OK</i><span data-i18n="Open">Open</span></span>
+        <span><i class="k k-back">BACK</i><span data-i18n="Close">Close</span></span>
+      </div>
+    </div>
+  </div>
 
   <!-- ---------------- OVERLAYS ---------------- -->
   <div id="loader" class="hidden">
@@ -353,7 +438,7 @@
   <div id="picker" class="hidden">
     <div class="picker-box">
       <div class="picker-title" id="picker-title"></div>
-      <div class="picker-scroll" id="picker-scroll"><div id="picker-list"></div></div>
+      <div class="picker-scroll" id="picker-scroll"><div id="picker-list"></div><i class="vtrack"><b id="pick-thumb"></b></i></div>
       <div class="picker-foot">
         <span><i class="k k-ok">OK</i><span data-i18n="Choose">Choose</span></span>
         <span><i class="k k-back">BACK</i><span data-i18n="Cancel">Cancel</span></span>

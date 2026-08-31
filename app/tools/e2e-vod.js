@@ -453,7 +453,9 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('movie playback URL');
 
-    await press(page, 'left');
+    /* Leaving a full-screen view puts the cursor back on the rail now — the
+       left bar comes with it — so the press that used to be needed to get
+       there is not. */
     await press(page, 'up');
     await press(page, 'left');       // Series -> Movies
     await sleep(400);

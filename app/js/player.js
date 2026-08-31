@@ -350,31 +350,31 @@
     }
 
     if (P.isAndroid) {
-      /* The same arithmetic as above, and then one more step that Tizen does
-         not need.
+      /* The same arithmetic as above, in the page's own pixels, and then the
+         viewport those pixels are measured against.
 
-         The app draws in a fixed 1920x1080 that #stage scales to the window,
-         and that window is measured in CSS pixels. On Android a CSS pixel is a
-         dp: a 1080p television at xhdpi gives the page a 960x540 viewport. The
-         surface, though, is laid out in device pixels — so handing it the CSS
-         numbers put the picture in the top-left quarter of the screen at half
-         the size, which is what a wrong resolution looks like.
+         A CSS pixel is not a device pixel on Android and there is no constant
+         that says what it is: this television reports a 1920 viewport and a
+         device pixel ratio of 2 while 1920 covers the panel exactly, because
+         the WebView folds its page scale in and still reports the density.
+         Multiplying by that ratio drew the picture at twice the size, in the
+         top-left quarter of the screen.
 
-         devicePixelRatio is the conversion between the two, and it is still
-         right on a 4K set where both the density and the page scale differ. A
-         Samsung set reports 1920x1080 at a ratio of 1, which is why the Tizen
-         branch above has never needed this. */
+         So nothing is converted here. The shell knows how many real pixels its
+         own view is; it is told how many the page thinks it has, and works out
+         the rest. Tizen has no such gap — AVPlay's rect is in the window's own
+         pixels — which is why the branch above sends numbers and stops. */
       var ar = pictureRect();
       var ak = stageScale();
-      var dpr = w.devicePixelRatio || 1;
-      var aox = Math.max(0, ((w.innerWidth || 1920) - 1920 * ak) / 2);
-      var aoy = Math.max(0, ((w.innerHeight || 1080) - 1080 * ak) / 2);
+      var avw = w.innerWidth || 1920, avh = w.innerHeight || 1080;
+      var aox = Math.max(0, (avw - 1920 * ak) / 2);
+      var aoy = Math.max(0, (avh - 1080 * ak) / 2);
       var arect = [
-        Math.round((ar[0] * ak + aox) * dpr), Math.round((ar[1] * ak + aoy) * dpr),
-        Math.round(ar[2] * ak * dpr), Math.round(ar[3] * ak * dpr)
+        Math.round(ar[0] * ak + aox), Math.round(ar[1] * ak + aoy),
+        Math.round(ar[2] * ak), Math.round(ar[3] * ak)
       ];
       try {
-        if (NA()) NA().setRect(arect[0], arect[1], arect[2], arect[3]);
+        if (NA()) NA().setRect(arect[0], arect[1], arect[2], arect[3], avw, avh);
         rectPending = false;
         P.lastRect = arect;
       } catch (e) {
@@ -533,7 +533,8 @@
       na.play(url, P.mode === 'full' ? 'full' : 'preview');
     } catch (e) {
       opening = false;
-      fire('onError', 'Player error: ' + (e && e.message ? e.message : e));
+      P.lastError = 'Player error: ' + (e && e.message ? e.message : e);
+      fire('onError', 'Player error');
     }
   }
 
@@ -597,11 +598,16 @@
         fire('onPlaying');
       }, function (e) {
         opening = false;
-        fire('onError', 'Could not open this stream' + (e && e.name ? ' (' + e.name + ')' : ''));
+        /* The name of the failure is worth keeping, but not in the sentence:
+           what goes up is a key the dictionaries carry, and the detail stays
+           where the diagnostics rows can find it. */
+        P.lastError = 'open: ' + (e && e.name ? e.name : 'failed');
+        fire('onError', 'Could not open this stream');
       });
     } catch (e) {
       opening = false;
-      fire('onError', 'Player error: ' + (e && e.message ? e.message : e));
+      P.lastError = 'Player error: ' + (e && e.message ? e.message : e);
+      fire('onError', 'Player error');
     }
   }
 

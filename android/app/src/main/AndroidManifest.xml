@@ -30,6 +30,7 @@
             android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|navigation|density"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize"
             android:theme="@style/Theme.AquaPlay">
 
             <!-- LEANBACK_LAUNCHER is the TV home screen. The plain LAUNCHER

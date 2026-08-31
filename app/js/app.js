@@ -15,21 +15,123 @@
   var CH_KEY  = 'ch2:';
   var CH_TTL  = 12 * 3600 * 1000;   // channel list cache
   var EPG_KEY = 'epg3:';            // bumped: the guide is now filtered per playlist
-  /* A guide costs tens of seconds to read on a TV, so a cached one is used for
-     as long as it still covers the day, and anything older than EPG_FRESH is
-     replaced quietly underneath the app rather than in front of it. */
+  /* A guide costs tens of seconds to read on a TV, so a cached one is used
+     for as long as it still covers what anybody is about to look at, and a
+     replacement is read quietly underneath the app rather than in front of
+     it. See EPG_MARGIN below: it is coverage that decides, not age. */
   var EPG_TTL   = 12 * 3600 * 1000;
-  var EPG_FRESH = 2 * 3600 * 1000;
+  /* Which build this is, for the drawer to show. Written here rather than
+     read from config.xml: the Android package does not carry that file, and
+     the page is the one thing both platforms ship whole. Two places to bump
+     is one place to forget, so test-units.js fails when this and config.xml
+     disagree — which is the only thing that makes two places safe. */
+  A.version = '1.0.0';
+
+  /* How much of the future a cached guide has to still cover before the app
+     will leave it alone. Ninety minutes is about a film, and comfortably more
+     than the panel shows. */
+  var EPG_MARGIN = 90 * 60 * 1000;
 
   /* ---------------- stage scaling ---------------- */
+  /* The largest viewport the app has been given. An on-screen keyboard can
+     take most of the height away — the Android shell asks the window not to
+     resize for it, but that is API 27 and up and this runs from 21 — and
+     rescaling the whole app around a keyboard is what "the resolution is
+     wrong" looked like. A viewport that has lost a third of its height without
+     losing any width is a keyboard, not a new screen. */
+  var seenH = 0;
+
   function fitStage() {
     var stage = U.$('stage');
-    var s = Math.min(w.innerWidth / 1920, w.innerHeight / 1080);
+    var vw = w.innerWidth, vh = w.innerHeight;
+    if (vh > seenH) seenH = vh;
+    if (seenH && vh < seenH * 0.7) vh = seenH;
+    var s = Math.min(vw / 1920, vh / 1080);
     if (!isFinite(s) || s <= 0) s = 1;
     stage.style.transform = 'scale(' + s + ')';
-    stage.style.left = Math.max(0, (w.innerWidth - 1920 * s) / 2) + 'px';
-    stage.style.top  = Math.max(0, (w.innerHeight - 1080 * s) / 2) + 'px';
+    stage.style.left = Math.max(0, (vw - 1920 * s) / 2) + 'px';
+    stage.style.top  = (Math.max(0, (vh - 1080 * s) / 2) - imeLift) + 'px';
   }
+
+  /* ---------------- out from under the keyboard ----------------
+
+     The Android window is declared adjustNothing, so the viewport keeps
+     its full height and the keyboard is simply painted over the bottom of
+     it. The page cannot see that, and on the setup screen the field being
+     typed into is exactly what ends up underneath — somebody types a
+     playlist URL blind.
+
+     So the shell reports the keyboard's height and the stage is raised far
+     enough to put the focused field above it. Raised, not resized: the
+     stage is a fixed 1920x1080 and its scale is what keeps the TV and the
+     browser pixel-identical, so the one thing that must not move is s. */
+  var imeLift = 0;      // CSS pixels the stage is currently raised by
+  var imeShown = false;   // the keyboard is up, however tall it is
+  var imeHeight = 0;    // how tall the keyboard is, 0 when it is not up
+
+  /* How much of the viewport the keyboard is standing on.
+
+     The window resizes for it, and fitStage above already refuses to let
+     that change the stage's scale — the height it throws away is exactly
+     the height of the keyboard, so nothing has to be told anything.
+
+     0.95 rather than 0: a viewport that loses a handful of pixels to a
+     navigation bar appearing is not a keyboard. */
+  function imeFromViewport() {
+    var vh = w.innerHeight;
+    return (seenH && vh < seenH * 0.95) ? (seenH - vh) : 0;
+  }
+
+  function liftForIme() {
+    var fromView = imeFromViewport();
+    if (fromView) imeHeight = fromView;
+
+    var el = document.activeElement;
+    var lift = 0;
+    var up = imeShown || imeHeight > 0 || fromView > 0;
+    if (up && el && el.getBoundingClientRect && el !== document.body) {
+      var r = el.getBoundingClientRect();
+      if (r.height) {
+        /* Where the field sits with the stage back where it belongs.
+
+           If the keyboard has a height, keep the field 28px above it. It
+           usually does not: a television draws the keyboard in its own
+           window, which insets nothing, and the insets say visible=true,
+           height=0. So the fallback is not a guess at the height but a
+           rule that does not need one — put the field in the top 45% and
+           no keyboard of any size reaches it. */
+        var bottom = r.bottom + imeLift;
+        var room = imeHeight > 0 ? (w.innerHeight - imeHeight - 28)
+                                 : Math.round(w.innerHeight * 0.45);
+        lift = Math.max(0, Math.round(bottom - room));
+      }
+    }
+    if (lift === imeLift) return;
+    imeLift = lift;
+    fitStage();
+  }
+
+  /* The shell measures in whatever pixels its window is in, and this is in
+     CSS pixels. devicePixelRatio does not convert between the two — it
+     reads 2 on a set whose CSS viewport is 1:1 with its screen, which
+     halved the keyboard and left the page sure it had room it did not.
+
+     So the shell sends its window height as well, and the only quantity
+     used is the fraction of the window the keyboard covers. That is the
+     same number in any unit either side happens to be counting in. */
+  w.AquaPlayShell = w.AquaPlayShell || {};
+  w.AquaPlayShell.ime = function (up, px, winPx) {
+    var n = Math.max(0, Number(px) || 0);
+    var win = Number(winPx) || 0;
+    imeShown = !!Number(up);
+    imeHeight = (n > 0 && win > 0) ? Math.round(w.innerHeight * (n / win)) : 0;
+    liftForIme();
+  };
+
+  /* Moving from one field to the next while the keyboard is up has to
+     re-aim it, and focus lands before the layout settles. */
+  w.addEventListener('focusin', function () { setTimeout(liftForIme, 0); }, false);
+  w.addEventListener('focusout', function () { setTimeout(liftForIme, 0); }, false);
 
   /* ---------------- boot ---------------- */
   A.boot = function () {
@@ -44,7 +146,10 @@
     document.documentElement.classList.add(U.platform);
     if (U.isTV) document.documentElement.classList.add('tv');
     fitStage();
-    w.addEventListener('resize', U.debounce(fitStage, 120), false);
+    w.addEventListener('resize', U.debounce(function () {
+      fitStage();
+      liftForIme();
+    }, 120), false);
 
     loadHlsIfNeeded(function () {
       Player.init();
@@ -60,9 +165,61 @@
       startReminders();
       bindLifecycle();
 
+      /* After everything else. A version check is the least urgent thing
+         the app does and must never be in front of the playlist. */
+      setTimeout(function () { try { A.checkForUpdate(); } catch (e) {} }, 12000);
+
       var p = Store.activeProfile();
       if (!p) { route = 'setup'; Setup.show({ cancelable: false }); return; }
       loadProfile(p);
+    });
+  };
+
+  /* ---------------- a newer build ----------------
+
+     The app cannot update itself — a Samsung set takes a signed .wgt and an
+     Android box takes an APK, both by hand — so the only useful thing it can
+     do is mention that a newer one exists and then stop talking about it.
+
+     Checked at most once a day, after everything else has loaded, and every
+     failure is silent: no network, a rate limit, a private repository and a
+     reply in a shape nobody expected all mean the same thing here, which is
+     that there is nothing to say. */
+  var RELEASES = 'https://api.github.com/repos/Dolev24/aquaplay-iptv/releases/latest';
+  var UPDATE_EVERY = 24 * 3600 * 1000;
+
+  /* "0.7.46" -> 704600, so a plain > works and 0.7.9 sorts under 0.7.10. */
+  function versionValue(v) {
+    var parts = String(v || '').split('.');
+    var n = 0;
+    for (var i = 0; i < 3; i++) n = n * 1000 + (parseInt(parts[i], 10) || 0);
+    return n;
+  }
+
+  function announceUpdate(latest) {
+    var note = U.$('update-note');
+    if (!note) return;
+    U.$('update-text').textContent =
+      T('Version {v} is available', { v: latest }) + '  ·  ' + T('this is {v}', { v: A.version });
+    note.classList.remove('hidden', 'going');
+    /* Long enough to read twice, then away on its own. */
+    setTimeout(function () { note.classList.add('going'); }, 9000);
+    setTimeout(function () { note.classList.add('hidden'); }, 9500);
+  }
+
+  A.checkForUpdate = function () {
+    var last = 0;
+    try { last = +(w.localStorage.getItem('aquaplay.updateCheck') || 0); } catch (e) {}
+    if (Date.now() - last < UPDATE_EVERY) return;
+    try { w.localStorage.setItem('aquaplay.updateCheck', String(Date.now())); } catch (e) {}
+
+    Net.json(RELEASES).then(function (rel) {
+      var tag = rel && (rel.tag_name || rel.name);
+      if (!tag) return;
+      var latest = String(tag).replace(/^v/i, '').trim();
+      if (versionValue(latest) > versionValue(A.version)) announceUpdate(latest);
+    }).catch(function () {
+      /* Nothing to say, which is the same answer as every other failure. */
     });
   };
 
@@ -224,6 +381,19 @@
     }).catch(function (err) {
       U.loader(false);
       U.toast(err && err.message ? err.message : T('Could not load the playlist'));
+
+      /* A playlist that fails to reload is not a playlist that has gone. Clear
+         cached data forces a fresh download, and one provider hiccup used to
+         land the viewer on "Add your playlist" with their setup apparently
+         wiped — which is what the crash report was. If there are channels on
+         screen already, keep them and say what happened; the setup screen is
+         for having nothing, not for having a bad minute. */
+      if (Channels.channels().length) {
+        route = 'main';
+        Setup.hide();
+        Channels.show();
+        return;
+      }
       route = 'setup';
       Setup.show({ cancelable: Store.profiles().length > 0 });
     });
@@ -309,6 +479,7 @@
     ReplayView.hide();
     route = 'main';
     Channels.show();
+    Channels.focusRail();
   };
 
   A.enterCatalog = function () {
@@ -321,6 +492,7 @@
     CatalogView.hide();
     route = 'main';
     Channels.show();
+    Channels.focusRail();
   };
 
   A.enterSeries = function () {
@@ -333,6 +505,7 @@
     SeriesView.hide();
     route = 'main';
     Channels.show();
+    Channels.focusRail();
   };
 
   /* ---------------- EPG ---------------- */
@@ -377,11 +550,19 @@
       if (blob && EPG.hydrate(blob)) {
         U.log('guide from cache:', EPG.data.count);
         Channels.onEpgReady();
-        /* Old enough to be worth replacing, but not so old it is useless:
-           read the new one in the background with the old one on screen. */
-        if (Date.now() - (EPG.data.builtAt || 0) > EPG_FRESH) {
-          U.log('guide is stale, refreshing quietly');
+        /* Refresh when the guide is running out, not when the file is old.
+           Age was the wrong question: a guide fetched an hour ago that reaches
+           to midnight is fine, and re-reading a 242MB file because a clock
+           ticked is how opening the app twice in one evening came to cost a
+           minute each time. What matters is whether it still covers what
+           somebody is about to look at. */
+        var covers = EPG.coversUntil();
+        var runningOut = !covers || (covers - Date.now()) < EPG_MARGIN;
+        if (runningOut) {
+          U.log('guide runs out at', new Date(covers || 0), '- refreshing quietly');
           fetchGuide(p, s, true);
+        } else {
+          U.log('guide covers to', new Date(covers), '- leaving it alone');
         }
         return null;
       }
@@ -514,12 +695,40 @@
     SettingsView.show();
   };
 
-  A.closeSettings = function () {
+  A.closeSettings = function (toRail) {
     SettingsView.hide();
     var p = Store.activeProfile();
     if (!p) { A.openSetup(false); return; }
     route = 'main';
     Channels.show();
+    /* Only when the viewer asked to go that way. Back means "put me back
+       where I was"; left means "take me toward the menu", and only the
+       second should move the cursor onto the rail. */
+    if (toRail) Channels.focusRail();
+  };
+
+  /* Switch to another playlist that is already set up.
+
+     Not a reload: the cache is left alone, so coming back to one that was
+     opened earlier today costs nothing. Everything that belongs to a playlist
+     is keyed by its id in the store — favourites, recents, numbers, locks,
+     reminders — so switching is genuinely just this. */
+  A.switchProfile = function (id) {
+    var p = Store.activeProfile();
+    if (p && p.id === id) return;
+    var next = null;
+    Store.profiles().forEach(function (x) { if (x.id === id) next = x; });
+    if (!next) return;
+
+    Player.stop();
+    SettingsView.hide();
+    SeriesView.hide();
+    ReplayView.hide();
+    CatalogView.hide();
+    Store.setActiveProfile(id);
+    EPG.clear();
+    Channels.onEpgReady();
+    loadProfile(next, false);
   };
 
   A.refreshPlaylist = function () {

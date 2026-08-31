@@ -31,7 +31,11 @@
          language their television is set to. */
       dateFormat: 'long',  // long | short | dmy | mdy | iso | off
       guideView: 'ahead',  // ahead | centred — where the panel puts what is on
-      pictureSize: 'fill', // fit | fill | stretch
+      /* Letterbox, not crop. They are the same picture on the 16:9 that
+         nearly everything is; where they differ — a 4:3 channel, a film in
+         2.39:1 — fill throws away the edges of the frame and fit does not,
+         and a default should not quietly cut the top off somebody's film. */
+      pictureSize: 'fit',  // fit | fill | stretch
       epgOffset: 0,        // hours to shift the guide by, for wrong-timezone XMLTV
       clock24: true,       // 24-hour or am/pm
       autoReconnect: true, // retry a dropped stream instead of just failing
@@ -108,7 +112,55 @@
   };
 
   /* ---------- profiles ---------- */
+  /* What a setting is when nobody has touched it. Read from the same table
+     the store starts from, so the two can never disagree about what "default"
+     means. */
+  S.defaultFor = function (path) {
+    var parts = String(path).split('.'), o = DEFAULTS;
+    for (var i = 0; i < parts.length; i++) {
+      if (o == null) return undefined;
+      o = o[parts[i]];
+    }
+    return o;
+  };
+
   S.profiles = function () { return state.profiles; };
+
+  /* What makes two entries the same playlist: the thing they fetch. A name
+     is what somebody calls it and can be changed; the URL, or the server and
+     account, is what it *is*. */
+  S.sameSource = function (a, b) {
+    if (!a || !b || a.type !== b.type) return false;
+    if (a.type === 'm3u') return (a.url || '') === (b.url || '');
+    return (a.host || '') === (b.host || '') && (a.user || '') === (b.user || '');
+  };
+
+  S.profileNamed = function (name, exceptId) {
+    var want = String(name || '').trim().toLowerCase();
+    if (!want) return null;
+    var found = null;
+    state.profiles.forEach(function (p) {
+      if (p.id !== exceptId && String(p.name || '').trim().toLowerCase() === want) found = p;
+    });
+    return found;
+  };
+
+  /* Save a playlist, replacing the entry for the same source rather than
+     adding a second one.
+
+     Connect always added, so every visit to Settings -> Playlist that ended in
+     Connect left another identical row behind — six of them, in the report
+     that found this. */
+  S.saveProfile = function (p) {
+    var existing = null;
+    state.profiles.forEach(function (x) { if (!existing && S.sameSource(x, p)) existing = x; });
+    if (!existing) return S.addProfile(p);
+
+    Object.keys(p).forEach(function (k) { if (k !== 'id') existing[k] = p[k]; });
+    state.activeProfile = existing.id;
+    save();
+    return existing;
+  };
 
   S.addProfile = function (p) {
     p.id = 'p' + Date.now().toString(36) + Math.floor(Math.random() * 1000);
@@ -185,6 +237,15 @@
     return null;
   };
   S.clearNumbers = function (pid) { state.numbers[pid] = {}; save(); };
+
+  /* Everything, back to how the app arrived: playlists, favourites, numbers,
+     locks, reminders, settings. Deliberately the whole lot rather than a
+     tidy-up — "reset" that leaves things behind is the sort of promise that
+     sends somebody looking for the reinstall button anyway. */
+  S.factoryReset = function () {
+    state = JSON.parse(JSON.stringify(DEFAULTS));
+    save();
+  };
 
   /* ---------- per-channel locks ----------
      Separate from the adult heuristic. `settings.parental` turns on a guess

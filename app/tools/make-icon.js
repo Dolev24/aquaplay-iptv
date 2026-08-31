@@ -6,13 +6,44 @@
 
    Samsung wants four things, and they are not the same shape as each other:
 
-     app/icon.png                              512 x 423   24-bit  < 300 KB
-       The application icon. A TV tile is wider than it is tall, which is why
-       this is not square — a square icon gets letterboxed on the launcher.
-       config.xml points at this one and pack.js puts it in the .wgt.
+     app/icon.png                              512 x 512   24-bit  < 300 KB
+       What goes in the .wgt. Square, and it cannot usefully be anything
+       else — read this before changing it again, because it has now been
+       changed three times and twice it was made worse.
 
-     branding/testing-icon-117x117.png         117 x 117   24-bit
-       The small icon the TV shows while an app is side-loaded for testing.
+       The wide tiles in a set’s Apps row belong to PUBLISHED apps. That
+       picture comes from the logo attached to the Seller Office listing,
+       not from the package: Samsung’s own Q&A says the packaged icon "is
+       an application icon used when you test your TV application. It is
+       not shown on published applications." An app installed in developer
+       mode has no listing, so the set falls back to this file and draws it
+       in its own square slot. Another developer reported exactly that —
+       rectangular on the App Bar, square when installed from Tizen Studio.
+
+       Measured off a photograph of a set, two tiles side by side: 743 and
+       724 pixels tall — one row, agreeing to 97%, which is what says the
+       reading is sound — and 1214 and 645 wide. The wide one is a store
+       app. This one is 645x724, near enough square once the foreshortening
+       on that side of the frame is allowed for.
+
+       And the set STRETCHES into that slot rather than fitting inside it,
+       which is how the shape was finally pinned down: a 512x423 changed
+       nothing anybody could see, and a 16:9 came back the same size and
+       visibly squashed. Square is the shape of the slot, so square is the
+       shape that is not distorted. Nothing in the package widens the tile.
+
+       config.xml points at this one and pack.js puts it in the package.
+
+       512 and not the 117x117 the guidelines name for it: that is the size
+       a local install wants on hand, and shipping only that left the set
+       scaling a 117px square up wherever it drew the icon larger. It came
+       back looking exactly as rough as that sounds. A television scales 512
+       down cleanly; nothing can invent detail on the way up. The 117 is
+       still produced, into branding/, where the guidelines ask for it.
+
+     branding/store-logo-512x423.png           512 x 423   24-bit  < 300 KB
+       The same picture again, where Seller Office wants it for a listing.
+       Not in the package: pack.js stages by name and only takes icon.png.
 
      branding/banner-background-1920x1080.png  1920 x 1080 24-bit  < 300 KB
      branding/banner-logo-1920x1080.png        1920 x 1080 32-bit  < 300 KB
@@ -22,8 +53,8 @@
    How the shapes are reconciled: the artwork is a square with the wordmark
    across its middle third, so the 512 x 423 icon is a crop rather than a
    squash or a pair of bars — the empty top and bottom go, the wordmark keeps
-   its proportions and gets bigger in the tile for it. The 117 is the whole
-   square, which is what a square asset wants.
+   its proportions and gets bigger in the tile for it. The square ones are
+   the whole square, which is what a square asset wants.
 
    The banner background is not the artwork: it is the artwork's own vignette,
    measured off it (21 grey in the middle, 40 in the corners, falling off as
@@ -48,9 +79,11 @@
 
    Android TV wants two more:
 
-     ../android/.../res/drawable/banner.png     320 x 180   24-bit
+     ../android/.../res/drawable[-dpi]/banner.png   320x180 to 960x540, 24-bit
        The launcher tile. Every TV app must have one — an app without a banner
-       does not appear on the Android TV home screen at all. It is the large
+       does not appear on the Android TV home screen at all. One copy per
+       density: unqualified drawable/ is mdpi, and a 1080p set is xhdpi, so a
+       lone 320x180 arrives on the home screen scaled up by two. It is the large
        logo again at a twentieth of the size, and flattened: the tile is opaque
        there, so the wordmark is composited over the vignette here rather than
        shipped as a second file the launcher would have to combine.
@@ -73,14 +106,30 @@ const BRAND = path.join(REPO, 'branding');
 const ANDROID = path.join(REPO, 'android', 'app', 'src', 'main', 'res');
 
 /* Android's density buckets, and the launcher icon each one wants. */
-const MIPMAPS = [['mdpi', 48], ['hdpi', 72], ['xhdpi', 96], ['xxhdpi', 144]];
+const MIPMAPS = [['mdpi', 48], ['hdpi', 72], ['xhdpi', 96], ['xxhdpi', 144],
+                 ['xxxhdpi', 192]];
+
+/* The banner, at the densities a television runs at.
+
+   drawable/ with no qualifier is the mdpi bucket, and a 1080p Android TV is
+   xhdpi — so the one 320x180 tile was being scaled up by two on the home
+   screen and looked exactly as soft as that sounds. The unqualified file
+   stays as the fallback; these are what the set will actually pick. The
+   artwork is 1254px square, so none of this is invented detail. */
+const TV_DPI = [['xhdpi', 640, 360], ['xxhdpi', 960, 540]];
 
 /* What each file has to be. The unit tests read this same table. */
 const SPEC = [
+  /* What goes in the .wgt. Square, because the slot a set gives a
+     side-loaded app is square and it stretches this into it. Two icons
+     declared with their sizes — the way another side-loaded package does
+     it — was tried and did not work on this set either. config.xml points
+     here, at one file. */
   { file: path.join(ROOT, 'icon.png'),
-    what: 'application icon', w: 512, h: 423, alpha: false, maxKB: 300 },
-  { file: path.join(BRAND, 'testing-icon-117x117.png'),
-    what: 'side-load testing icon', w: 117, h: 117, alpha: false, maxKB: 300 },
+    what: 'application icon (packaged)', w: 512, h: 512, alpha: false, maxKB: 300 },
+  /* A different shape again, and only Seller Office asks for it. */
+  { file: path.join(BRAND, 'store-logo-512x423.png'),
+    what: 'Seller Office logo', w: 512, h: 423, alpha: false, maxKB: 300 },
   { file: path.join(BRAND, 'banner-background-1920x1080.png'),
     what: 'large logo — background', w: 1920, h: 1080, alpha: false, maxKB: 300 },
   { file: path.join(BRAND, 'banner-logo-1920x1080.png'),
@@ -107,7 +156,17 @@ const SPEC = [
     what: 'Android adaptive foreground (' + m[0] + ')',
     w: Math.round(m[1] * 2.25), h: Math.round(m[1] * 2.25), alpha: true, maxKB: 300
   };
-}));
+})).concat(TV_DPI.map(function (t) {
+  return {
+    file: path.join(ANDROID, 'drawable-' + t[0], 'banner.png'),
+    what: 'Android TV banner (' + t[0] + ')', w: t[1], h: t[2], alpha: false, maxKB: 300
+  };
+})).concat([
+  /* The size the guidelines name for a local install. Not in the package —
+     what the TV actually draws is icon.png above. */
+  { file: path.join(BRAND, 'testing-icon-117x117.png'),
+    what: 'testing icon (local install)', w: 117, h: 117, alpha: false, maxKB: 300 }
+]);
 
 /* ---------- the artwork's own background ----------
    Measured off icon-source.jpg on a five by five grid: 21 grey at the centre,
@@ -396,6 +455,8 @@ async function render(args) {
      it was in the artwork, and this can. */
   const appIcon = onBanner(args.tile);
   const smallIcon = onBanner(args.smallTile);
+  const tvBanners = (args.tvBanners || []).map(onBanner);
+  const testIcon = onBanner(args.testIcon);
   const foregrounds = args.foregrounds.map(function (n) {
     return onBanner({ w: n, h: n, share: args.foreground.share });
   });
@@ -424,8 +485,72 @@ async function render(args) {
     }),
     foregrounds: foregrounds.map(function (f) { return b64(f.data); }),
     logo: b64(big.data),
-    tvBanner: b64(tile.data)
+    tvBanner: b64(tile.data),
+    tvBanners: tvBanners.map(function (t) { return b64(t.data); }),
+    testIcon: b64(testIcon.data)
   };
+}
+
+
+/* ---------- balancing the wordmark ----------
+
+   The mark is two lines and they are not centred on each other: the play
+   triangle extends the lower one to the right, so it sits about 22px right of
+   the upper one on a 900px canvas. The bounding box of the two together is
+   centred, which is what made this invisible to a measurement of the whole
+   thing and perfectly visible to a person looking at it.
+
+   So: find the empty band between the lines, and slide each line until its own
+   ink is centred. Nothing is scaled and nothing is redrawn — the pixels move
+   sideways, by whole pixels, and only as far as the canvas allows. */
+function balanceLines(rgba, w, h) {
+  const alphaAt = (x, y) => rgba[(y * w + x) * 4 + 3];
+
+  const inked = [];
+  for (let y = 0; y < h; y++) {
+    let any = false;
+    for (let x = 0; x < w && !any; x++) if (alphaAt(x, y) > 24) any = true;
+    inked.push(any);
+  }
+
+  /* The bands of ink, top to bottom. */
+  const bands = [];
+  let start = -1;
+  for (let y = 0; y < h; y++) {
+    if (inked[y] && start < 0) start = y;
+    else if (!inked[y] && start >= 0) { bands.push([start, y]); start = -1; }
+  }
+  if (start >= 0) bands.push([start, h]);
+  if (bands.length < 2) return rgba;      // one line, nothing to balance
+
+  const out = Buffer.alloc(rgba.length);   // transparent
+  const mid = (w - 1) / 2;
+
+  bands.forEach(([y0, y1]) => {
+    let x0 = w, x1 = -1;
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < w; x++) {
+        if (alphaAt(x, y) > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+      }
+    }
+    if (x1 < 0) return;
+    let shift = Math.round(mid - (x0 + x1) / 2);
+    /* Never so far that ink falls off the edge. */
+    if (x0 + shift < 0) shift = -x0;
+    if (x1 + shift > w - 1) shift = w - 1 - x1;
+
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < w; x++) {
+        const to = x + shift;
+        if (to < 0 || to >= w) continue;
+        const from = (y * w + x) * 4, dst = (y * w + to) * 4;
+        out[dst] = rgba[from]; out[dst + 1] = rgba[from + 1];
+        out[dst + 2] = rgba[from + 2]; out[dst + 3] = rgba[from + 3];
+      }
+    }
+  });
+
+  return out;
 }
 
 /* ---------- run ---------- */
@@ -448,16 +573,18 @@ async function render(args) {
     b64: b64,
     bgIn: BG_IN, bgOut: BG_OUT, bgPow: BG_POW,
     markLum: 190,               // the wordmark's own luminance: fully opaque there
-    /* 0.94 of the width. The mark is 3.1:1 and the tile is 1.21:1, so the
-       height that follows is 37% and no share can make it more — what the
-       number buys is the 140px of empty vignette either side going away. */
-    tile: { w: SPEC[0].w, h: SPEC[0].h, share: 0.94 },
-    smallTile: { w: SPEC[1].w, h: SPEC[1].h, share: 0.92 },
+    /* 0.92 of the width. The mark is 3.1:1 in a square, so the height that
+       follows is 31% and no share can make it more — what the number buys
+       is the empty vignette either side going away. */
+    tile: { w: SPEC[0].w, h: SPEC[0].h, share: 0.92 },
+    smallTile: { w: SPEC[1].w, h: SPEC[1].h, share: 0.94 },
     banner: { w: SPEC[3].w, h: SPEC[3].h, share: 0.52 },
     /* Wider on the small tile than on the big one: 320px across is not the
        place to be precious about margins, and the wordmark has to survive
        being one of a row of them on a launcher. */
     tvBanner: { w: SPEC[4].w, h: SPEC[4].h, share: 0.78 },
+    tvBanners: TV_DPI.map(function (t) { return { w: t[1], h: t[2], share: 0.78 }; }),
+    testIcon: { w: 117, h: 117, share: 0.92 },
     /* Edge to edge: this one is trimmed to the mark, so whatever draws it can
        size it by width and not have to know about a margin baked in. */
     inApp: { w: SPEC[5].w, h: SPEC[5].h, share: 0.98 },
@@ -482,7 +609,10 @@ async function render(args) {
     [SPEC[2], encodePNG(vignette(SPEC[2].w, SPEC[2].h), SPEC[2].w, SPEC[2].h, false)],
     [SPEC[3], encodePNG(logo, SPEC[3].w, SPEC[3].h, true)],
     [SPEC[4], encodePNG(flat(r.tvBanner, SPEC[4].w, SPEC[4].h), SPEC[4].w, SPEC[4].h, false)],
-    [SPEC[5], encodePNG(Buffer.from(r.inApp, 'base64'), SPEC[5].w, SPEC[5].h, true)]
+    /* Balanced first: the two lines are centred on each other, not merely
+       inside the same box. */
+    [SPEC[5], encodePNG(balanceLines(Buffer.from(r.inApp, 'base64'), SPEC[5].w, SPEC[5].h),
+                        SPEC[5].w, SPEC[5].h, true)]
   ];
   /* The legacy launcher icon stays opaque — API 25 and below draw it as it is,
      with no mask and no background of their own. */
@@ -494,6 +624,15 @@ async function render(args) {
     files.push([spec, encodePNG(Buffer.from(r.foregrounds[i], 'base64'),
                                 spec.w, spec.h, true)]);
   });
+  /* And the same tile for the densities a television asks for. */
+  TV_DPI.forEach(function (t, i) {
+    const spec = SPEC[6 + MIPMAPS.length * 2 + i];
+    files.push([spec, encodePNG(flat(r.tvBanners[i], spec.w, spec.h),
+                                spec.w, spec.h, false)]);
+  });
+  const testSpec = SPEC[6 + MIPMAPS.length * 2 + TV_DPI.length];
+  files.push([testSpec, encodePNG(flat(r.testIcon, testSpec.w, testSpec.h),
+                                  testSpec.w, testSpec.h, false)]);
   files.forEach(function (f) {
     fs.mkdirSync(path.dirname(f[0].file), { recursive: true });
     fs.writeFileSync(f[0].file, f[1]);

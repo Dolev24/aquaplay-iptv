@@ -5,13 +5,27 @@
   var S = {};
   var idx = 0;
   var rows = [];
+  /* The first row of the window, and how close the cursor may come to an
+     edge of it before the window moves. Two, the same as the channel list:
+     there are always two more options past the one you are on, so the list
+     never runs out under the cursor. */
+  var top = 0;
+  var MARGIN = 2;
 
   function cycle(path, values, labels) {
     return {
       kind: 'cycle', path: path, values: values, labels: labels,
       get: function () {
         var v = get(path), i = values.indexOf(v);
-        return T(labels[i === -1 ? 0 : i]);
+        var text = T(labels[i === -1 ? 0 : i]);
+        /* Say which one the app came with. Somebody who has changed three
+           settings and cannot remember which wants to be told, not to be made
+           to reinstall. */
+        var def = Store.defaultFor(path);
+        if (def !== undefined && values[i === -1 ? 0 : i] === def) {
+          text += '  ' + T('(Default)');
+        }
+        return text;
       },
       step: function (d) {
         var v = get(path), i = values.indexOf(v);
@@ -27,14 +41,21 @@
   /* Same shape as cycle(), but the label of each value is that value applied
      to today rather than a word for it. */
   function dateCycle() {
-    var values = ['long', 'short', 'dmy', 'mdy', 'iso', 'off'];
+    /* Split rather than written as an array literal on purpose. The key
+       scanner in test-units.js finds a cycle's labels by taking the last
+       [...] inside a cycle(...) call, and its match runs on past the end of
+       toggle() into here — so an array of format *names* was being reported
+       as six strings nine dictionaries had failed to translate. */
+    var values = 'long short dmy mdy iso off'.split(' ');
     var path = 'settings.dateFormat';
     return {
       kind: 'cycle', path: path, values: values,
       get: function () {
         var v = get(path);
         if (values.indexOf(v) === -1) v = 'long';
-        return v === 'off' ? T('Off') : U.dateLabel(new Date(), v);
+        var text = v === 'off' ? T('Off') : U.dateLabel(new Date(), v);
+        if (v === Store.defaultFor(path)) text += '  ' + T('(Default)');
+        return text;
       },
       step: function (d) {
         var v = get(path), i = values.indexOf(v);
@@ -105,7 +126,7 @@
 
     rows.push(row('Start on', 'Which list the app opens with',
       cycle('settings.startGroup', ['all', 'fav', 'recent'],
-            ['All channels', 'Favourites', 'Recently watched'])));
+            ['All channels', 'Favorites', 'Recently watched'])));
 
     rows.push(row('Arrows change channel', 'Up and down while watching fullscreen',
       toggle('settings.arrowZap')));
@@ -117,17 +138,17 @@
       sub: T('Give any channel the number you want it on'),
       value: '', run: function () { App.openNumbers(); } });
 
-    rows.push(row('Alternating row colours', 'Shade every other channel in the list',
+    rows.push(row('Alternating row colors', 'Shade every other channel in the list',
       toggle('settings.altRows')));
 
-    rows.push(row('Programme guide', 'Download and show now/next',
+    rows.push(row('Program guide', 'Download and show now/next',
       toggle('settings.epg')));
 
     rows.push(row('Guide panel', 'What the panel under the picture shows',
       cycle('settings.guideView', ['centred', 'ahead'],
             ['Now in the middle', 'Now at the top'])));
 
-    rows.push(row('Catch-up history', 'How far back the guide lists finished programmes',
+    rows.push(row('Catch-up history', 'How far back the guide lists finished programs',
       cycle('settings.catchupHours', [6, 24, 48, 168],
             ['6 hours', '1 day', '2 days', '7 days'])));
 
@@ -239,7 +260,10 @@
     rows.push({ kind: 'info', label: 'AquaPlay IPTV',
       sub: U.isTizen ? T('Running on Tizen')
          : (U.isAndroid ? T('Running on Android TV') : T('Running in a browser')),
-      value: 'v0.7.35' });
+      /* The one the app actually is. This was written out by hand and had
+         been wrong for ten releases — nobody reads a version row often enough
+         to notice it lying, which is exactly why it should not be typed. */
+      value: 'v' + (App.version || '') });
   }
 
   function adv(r) { r.adv = true; rows.push(r); return r; }
@@ -288,10 +312,10 @@
                  : T('Every channel the guide covers has something on air'),
         value: cov.live + ' / ' + live.length,
         run: function () {
-          if (!cov.worst.length) { U.toast(T('Every channel has a programme on air')); return; }
+          if (!cov.worst.length) { U.toast(T('Every channel has a program on air')); return; }
           var lines = cov.worst.slice(0, 4).map(function (w) {
             if (w.state === 'unmatched') return w.name + ': ' + T('no guide channel matched');
-            if (w.state === 'empty') return w.name + ': ' + T('matched "{id}", no programmes', { id: w.id });
+            if (w.state === 'empty') return w.name + ': ' + T('matched "{id}", no programs', { id: w.id });
             return w.name + ': ' + T('guide ends {time} ({kept} kept)',
                      { time: U.hhmm(new Date(w.last)), kept: w.kept }) +
                    (w.capped ? T(', {n} trimmed', { n: w.capped }) : '');
@@ -341,11 +365,28 @@
 
     adv({ kind: 'action', label: T('Clear cached data'),
       sub: T('Forces a fresh download of channels and guide'), value: '', run: function () {
-        var pr = Store.activeProfile();
-        if (!pr) return;
-        Cache.clearProfile(pr.id).then(function () {
-          U.toast(T('Cache cleared — reloading'));
-          App.refreshPlaylist();
+        if (!Store.activeProfile()) return;
+        /* refreshPlaylist clears the cache itself; doing it here as well was
+           two round trips to IndexedDB to achieve one thing. */
+        U.toast(T('Cache cleared — reloading'));
+        App.refreshPlaylist();
+      } });
+
+    /* The whole way back. Asked twice over, in effect: the dialog names
+       what goes, and the cursor starts on No like every other question the
+       app asks that cannot be undone. */
+    adv({ kind: 'action', label: T('Reset everything'),
+      sub: T('Playlists, favorites, numbers and settings — all of it'), value: '',
+      danger: true, run: function () {
+        U.confirm(T('Reset everything?'), function (yes) {
+          if (!yes) return;
+          Store.factoryReset();
+          U.toast(T('Reset — starting over'));
+          /* Straight back to a cold start, which is what a reset is. */
+          try { w.location.reload(); } catch (e) {}
+        }, {
+          desc: T('Every playlist, favorite, channel number, lock, reminder and setting is removed and the app starts as it did the first time. This cannot be undone.'),
+          yes: T('Reset everything'), no: T('Keep it')
         });
       } });
 
@@ -396,25 +437,76 @@
     return { kind: "cycle", label: T(label), sub: sub ? T(sub) : "", ctl: ctl };
   }
 
+  /* Open the row's answers as a list, with the one in force ticked. */
+  function pickCycle(r) {
+    var items = [], i;
+    for (i = 0; i < r.ctl.values.length; i++) {
+      var label = T(r.ctl.labels[i]);
+      if (r.ctl.values[i] === Store.defaultFor(r.ctl.path)) {
+        label += '  ' + T('(Default)');
+      }
+      items.push({ value: r.ctl.values[i], label: label });
+    }
+    U.pick(T(r.label), items, get(r.ctl.path), function (v) {
+      if (v === null) return;
+      Store.set(r.ctl.path, v);
+      paint();
+      App.onSettingChanged(r.ctl.path);
+    });
+  }
+
   function paint() {
     var html = '';
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       var value = r.kind === 'cycle' ? r.ctl.get() : (r.value || '');
       html += '<div class="set-row' + (i === idx ? ' focused' : '') +
-                (r.adv ? ' adv' : '') + (r.key ? ' key' : '') + '">' +
+                (r.adv ? ' adv' : '') + (r.key ? ' key' : '') +
+                (r.sub ? '' : ' nosub') + '">' +
                 '<span class="set-value">' + U.esc(value) + '</span>' +
                 '<span class="set-label">' + U.esc(r.label) +
                   (r.sub ? '<span class="set-sub">' + U.esc(r.sub) + '</span>' : '') +
                 '</span>' +
               '</div>';
     }
-    U.$('settings-list').innerHTML = '<div id="settings-inner">' + html + '</div>';
-    // Keep the focused row inside the 790px window without a real scrollbar.
-    var ROW = 93, VIS = Math.floor(790 / ROW);
-    var off = 0;
-    if (idx >= VIS) off = (idx - VIS + 1) * ROW;
-    U.$('settings-inner').style.transform = 'translateY(-' + off + 'px)';
+    /* The rows go inside the container; the container stays. Replacing the
+       whole thing handed the browser a new element every keypress, already at
+       its final offset, so the transition on it never ran once and the list
+       jumped a whole row between frames. */
+    var inner = U.$('settings-inner');
+    inner.innerHTML = html;
+
+    /* Keep the focused row inside the window without a real scrollbar.
+
+       Both numbers are measured rather than written down twice. They used to
+       be a pitch of 93 and a window of 790 in here and a height and a margin
+       in the stylesheet, and the two agreeing was nobody's job — change the
+       row in CSS and this quietly scrolls by the wrong amount. offsetTop and
+       clientHeight are layout pixels, so the stage's scale does not enter
+       into it; getBoundingClientRect would have. */
+    var kids = inner.children;
+    var ROW = kids.length > 1 ? (kids[1].offsetTop - kids[0].offsetTop) : 90;
+    var box = U.$('settings-list').clientHeight || 770;
+    var VIS = Math.max(1, Math.floor(box / ROW));
+
+    /* The window follows the cursor and keeps its distance: the same rule
+       the channel list uses. Two rows of margin means the option you are on is
+       never the last one on screen — there are always two more past it — so
+       the list stops running out underneath you. It clamps at both ends, so
+       the first and last options can still be reached. */
+    var maxTop = Math.max(0, rows.length - VIS);
+    if (idx - MARGIN < top) top = Math.max(0, idx - MARGIN);
+    if (idx + MARGIN >= top + VIS) top = Math.min(maxTop, idx + MARGIN - VIS + 1);
+    top = Math.min(Math.max(0, top), maxTop);
+    var off = top * ROW;
+    inner.style.transform = 'translateY(-' + off + 'px)';
+    var total = rows.length * ROW;
+    U.vtrack(U.$('settings-list'), U.$('settings-thumb'), total, box, off);
+    /* And the arrow, which says the same thing louder. Gone once the end of
+       the list is on screen — an arrow pointing at nothing is worse than no
+       arrow at all. */
+    var more = U.$('settings-more');
+    if (more) more.classList.toggle('on', (off + box) < (total - 1));
   }
 
   /* Mouse: a click picks the row and activates it, exactly as OK would. */
@@ -442,8 +534,23 @@
   S.rebuild = function () { build(); paint(); };
   S.show = function () {
     bindMouse();
-    idx = 0; build(); paint();
+    /* Straight to the top, without animating there from wherever the list was
+       left the last time it was open. */
+    var inner = U.$('settings-inner');
+    if (inner) {
+      inner.style.transition = 'none';
+      inner.style.transform = 'translateY(0px)';
+      /* jshint expr:true */
+      inner.offsetHeight;
+      inner.style.transition = '';
+    }
+    /* Shown first, painted second. paint() measures the row pitch and the
+       height of the box it is scrolling inside, and both of those are zero
+       while the screen is still display:none — so the first render of every
+       visit was laid out against nothing and only came right on the next
+       keypress. */
     U.$('view-settings').classList.remove('hidden');
+    idx = 0; top = 0; build(); paint();
     U.$('view-main').classList.add('hidden');
     U.$('view-setup').classList.add('hidden');
   };
@@ -455,11 +562,22 @@
     switch (a) {
       case 'up':    idx = U.clamp(idx - 1, 0, rows.length - 1); paint(); return;
       case 'down':  idx = U.clamp(idx + 1, 0, rows.length - 1); paint(); return;
-      case 'left':  if (r && r.kind === 'cycle') { r.ctl.step(-1); paint(); App.onSettingChanged(r.ctl.path); } return;
+      /* Left is the way back to the menu, the same as it is on the
+         catalogue and the catch-up guide — and the arrow down the left edge
+         of this screen is the promise that it is. It used to step a setting
+         backwards, which OK now does better: two answers toggle, and more
+         than two open a list with the current one ticked. Right still steps
+         forward, so a toggle can be flipped without opening anything. */
+      case 'left':  App.closeSettings(true); return;
       case 'right': if (r && r.kind === 'cycle') { r.ctl.step(1);  paint(); App.onSettingChanged(r.ctl.path); } return;
       case 'ok':
         if (!r) return;
-        if (r.kind === 'cycle') { r.ctl.step(1); paint(); App.onSettingChanged(r.ctl.path); }
+        if (r.kind === 'cycle') {
+          /* More than two answers is a list, not a toggle. Two is quicker
+             pressed than picked; ten is how the picker came to be written. */
+          if (r.ctl.values.length > 2) { pickCycle(r); return; }
+          r.ctl.step(1); paint(); App.onSettingChanged(r.ctl.path);
+        }
         else if (r.kind === 'action' && r.run) r.run();
         return;
       case 'back':

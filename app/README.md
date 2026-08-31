@@ -372,13 +372,14 @@ Samsung asks for four, and they are not the same shape:
 
 | file | size | depth | what it is |
 | --- | --- | --- | --- |
-| `icon.png` | 512x423 | 24-bit | the application icon, the one in the .wgt |
+| `icon.png` | 512x512 | 24-bit | the application icon, the one in the .wgt |
 | `../branding/testing-icon-117x117.png` | 117x117 | 24-bit | side-loading for testing |
 | `../branding/banner-background-1920x1080.png` | 1920x1080 | 24-bit | large logo, underneath |
 | `../branding/banner-logo-1920x1080.png` | 1920x1080 | 32-bit | large logo, the wordmark |
 
-Each under 300 KB. Note the first one: a TV tile is wider than it is tall, so
-the application icon is **not square** — a square one gets letterboxed.
+Each under 300 KB. The first one is square and settled — see ARCHITECTURE.md
+before changing it. Four different shapes have been tried and none of them
+changed the tile the TV draws.
 
 ```bash
 npm run icons

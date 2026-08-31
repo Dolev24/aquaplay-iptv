@@ -3,8 +3,11 @@ package com.aquaplay.tv
 import android.util.Log
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.SequenceInputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Provider HTTP, answered by the app rather than by the WebView.
@@ -21,12 +24,104 @@ import java.net.URL
  * user agent and the redirect policy — all three of which providers have
  * opinions about.
  *
- * Called on a background thread, several at a time, so there is no shared
- * mutable state in here at all.
+ * Called on a background thread, several at a time. The one piece of shared
+ * state is the image cache below, and everything that touches it is
+ * synchronized.
+ *
+ * @param cacheDir where cached images live between runs; null disables the
+ *   disk half and keeps the memory half.
  */
-class NetBridge {
+class NetBridge(private val cacheDir: File? = null) {
+
+    /* ---- the image cache ----------------------------------------------
+       Every logo in a playlist comes through this class, and a body handed
+       back from shouldInterceptRequest never reaches the WebView's own HTTP
+       cache — so each one was fetched again from the provider every time its
+       row scrolled back into view. Measured on a real playlist: 576ms each,
+       thirty in a row, which is exactly why a fast scroll left a column of
+       blanks that filled in seconds later.
+
+       Images only, and small ones. A playlist or a guide has no business in
+       here: those are megabytes, read once, and already cached by the app
+       itself. Memory answers the scrolling; disk answers the relaunch. */
+    private class Entry(val mime: String, val bytes: ByteArray)
+
+    /** Access-ordered, so eviction takes the least recently *used*. */
+    private val mem = LinkedHashMap<String, Entry>(64, 0.75f, true)
+    private var memBytes = 0L
+
+    private fun cached(url: String): Entry? {
+        synchronized(mem) { mem[url]?.let { return it } }
+        val f = diskFile(url) ?: return null
+        return try {
+            if (!f.isFile) return null
+            val raw = f.readBytes()
+            /* One file per image: the mime type on the first line, the bytes
+               after it. A second file per logo to hold one short string
+               would double the inodes for nothing. */
+            val nl = raw.indexOf('\n'.code.toByte())
+            if (nl <= 0) return null
+            val e = Entry(String(raw, 0, nl, Charsets.US_ASCII),
+                          raw.copyOfRange(nl + 1, raw.size))
+            remember(url, e, toDisk = false)
+            e
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun remember(url: String, e: Entry, toDisk: Boolean) {
+        synchronized(mem) {
+            val old = mem.put(url, e)
+            memBytes += e.bytes.size - (old?.bytes?.size ?: 0)
+            val it = mem.entries.iterator()
+            while (memBytes > MEM_MAX && it.hasNext()) {
+                val n = it.next()
+                memBytes -= n.value.bytes.size
+                it.remove()
+            }
+        }
+        if (!toDisk) return
+        val f = diskFile(url) ?: return
+        try {
+            f.parentFile?.mkdirs()
+            /* Written aside and renamed: a half-written logo that survived a
+               kill would be served as a broken one for ever after. */
+            val tmp = File(f.parentFile, f.name + ".tmp")
+            tmp.outputStream().use { o ->
+                o.write((e.mime + "\n").toByteArray(Charsets.US_ASCII))
+                o.write(e.bytes)
+            }
+            if (!tmp.renameTo(f)) tmp.delete()
+        } catch (t: Throwable) {
+            /* A cache that cannot write is still a cache. */
+        }
+    }
+
+    private fun diskFile(url: String): File? {
+        val dir = cacheDir ?: return null
+        return try {
+            val h = MessageDigest.getInstance("SHA-1").digest(url.toByteArray())
+            File(File(dir, "img"), h.joinToString("") { "%02x".format(it) })
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun respond(e: Entry): WebResourceResponse {
+        val out = HashMap<String, String>()
+        out["Access-Control-Allow-Origin"] = "*"
+        out["Access-Control-Allow-Headers"] = "*"
+        /* So the WebView keeps it in its own memory cache for the page's
+           lifetime as well, and does not come back through here at all. */
+        out["Cache-Control"] = "public, max-age=604800"
+        out["Content-Length"] = e.bytes.size.toString()
+        return WebResourceResponse(e.mime, null, 200, "OK", out,
+                                   ByteArrayInputStream(e.bytes))
+    }
 
     fun fetch(url: String, headers: Map<String, String>?): WebResourceResponse? {
+        cached(url)?.let { return respond(it) }
         return try {
             get(url, headers, 0)
         } catch (t: Throwable) {
@@ -69,7 +164,7 @@ class NetBridge {
             return get(URL(URL(url), to).toString(), headers, depth + 1)
         }
 
-        val body = if (code >= 400) conn.errorStream else conn.inputStream
+        var body = if (code >= 400) conn.errorStream else conn.inputStream
 
         val contentType = conn.contentType ?: "application/octet-stream"
         val mime = contentType.substringBefore(';').trim().ifEmpty { "application/octet-stream" }
@@ -87,6 +182,26 @@ class NetBridge {
         conn.getHeaderField("Content-Length")?.let { out["Content-Length"] = it }
         conn.getHeaderField("Accept-Ranges")?.let { out["Accept-Ranges"] = it }
         conn.getHeaderField("Content-Range")?.let { out["Content-Range"] = it }
+
+        /* Small images are read whole and kept. Everything else streams
+           straight through as it always did — a 200MB guide must not be
+           gathered into a byte array on its way past. */
+        if (code == 200 && mime.startsWith("image/") && body != null) {
+            val head = ByteArray(IMG_MAX + 1)
+            var n = 0
+            while (n < head.size) {
+                val r = try { body.read(head, n, head.size - n) } catch (t: Throwable) { -1 }
+                if (r < 0) break
+                n += r
+            }
+            if (n <= IMG_MAX) {
+                val e = Entry(mime, head.copyOf(n))
+                remember(url, e, toDisk = true)
+                return respond(e)
+            }
+            /* Too big to keep: hand back what was read, then the rest. */
+            body = SequenceInputStream(ByteArrayInputStream(head, 0, n), body)
+        }
 
         return WebResourceResponse(
             mime,
@@ -130,6 +245,13 @@ class NetBridge {
     }
 
     companion object {
+        /** Big enough for any logo; small enough that nothing else qualifies. */
+        const val IMG_MAX = 512 * 1024
+
+        /** A playlist of 127 logos is a couple of megabytes. This holds
+         *  several playlists' worth and still costs less than one guide. */
+        const val MEM_MAX = 24L * 1024 * 1024
+
         private const val MAX_REDIRECTS = 5
 
         /** What is worth carrying from the page's request. Origin and Referer

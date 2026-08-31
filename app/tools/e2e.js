@@ -74,6 +74,18 @@ function xmlTime(d) {
          p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + ' +0000';
 }
 
+/* The clock the run pretends it is, and how far that is from the real one.
+
+   Two in the afternoon: far enough from either midnight that six hours back
+   and seven hours on both stay inside the same day, whenever the suite is
+   actually run. */
+const PINNED = (function () {
+  const d = new Date();
+  d.setHours(14, 0, 0, 0);
+  return d.getTime();
+})();
+const CLOCK_SHIFT = PINNED - Date.now();
+
 function writeFixtures(port) {
   fs.mkdirSync(TESTDIR, { recursive: true });
 
@@ -87,7 +99,7 @@ function writeFixtures(port) {
   }
   fs.writeFileSync(path.join(TESTDIR, 'big.m3u'), lines.join('\n'), 'utf8');
 
-  const now = Date.now();
+  const now = Date.now() + CLOCK_SHIFT;
   const xml = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv>'];
   for (let i = 0; i < EPG_CHANNELS; i++) {
     xml.push('<channel id="ch' + i + '"><display-name>Channel ' + i + '</display-name></channel>');
@@ -312,6 +324,7 @@ const state = page => page.evaluate(() => {
     osdName: q('osd-name').textContent,
     osdNum: q('osd-num').textContent,
     pmName: q('pm-name').textContent,
+    pmLogo: q('pm-logo').style.backgroundImage,
     pmNow: q('pm-now').textContent
   };
 });
@@ -328,13 +341,31 @@ const state = page => page.evaluate(() => {
   const browser = await chromium.launch({ executablePath: chromePath(), headless: !HEADED });
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 
-  await context.addInitScript(() => {
+  await context.addInitScript((shift) => {
     try {
       window.localStorage.setItem('nova.state.v1', JSON.stringify({
         settings: { epg: true, epgHours: 8, autoReconnect: false, startupPlayLast: false }
       }));
     } catch (e) {}
-  });
+
+    /* The same pinned clock the guide was built against. Without it a run
+       near midnight puts the fixture's programmes on two different days and
+       the catalogue, which lists a day at a time, sees half of them. */
+    if (shift) {
+      const Real = Date;
+      const shifted = function (...args) {
+        return args.length ? new Real(...args) : new Real(Real.now() + shift);
+      };
+      shifted.now = () => Real.now() + shift;
+      shifted.parse = Real.parse;
+      shifted.UTC = Real.UTC;
+      shifted.prototype = Real.prototype;
+      window.Date = new Proxy(Real, {
+        construct: (t, args) => (args.length ? new Real(...args) : new Real(Real.now() + shift)),
+        get: (t, k) => (k === 'now' ? () => Real.now() + shift : Reflect.get(t, k))
+      });
+    }
+  }, CLOCK_SHIFT);
 
   const page = await context.newPage();
   const pageErrors = [];
@@ -355,6 +386,23 @@ const state = page => page.evaluate(() => {
       const st = document.getElementById('stage');
       return [getComputedStyle(st).width, getComputedStyle(st).height];
     }), ['1920px', '1080px'], 'the stage is a fixed 1920x1080');
+
+    /* Centred by the ink, not by a box that is wider than the ink. The
+       box was centred and the picture in it was not: background-size
+       contain drew the 3:1 mark 354px wide inside a 430px box, and a
+       later background-position:left put all the slack on one side. */
+    eq(await page.evaluate(() => {
+      const b = document.querySelector('.setup-brand');
+      return [getComputedStyle(b).backgroundPosition,
+              Math.round(b.offsetWidth / b.offsetHeight * 100) / 100];
+    }), ['50% 50%', 3],
+       'the wordmark is centred in a box the shape of the wordmark');
+
+    ok(await page.evaluate(() => {
+      const b = document.querySelector('.setup-brand').getBoundingClientRect();
+      const h = document.querySelector('.setup-wrap h1').getBoundingClientRect();
+      return Math.abs((b.left + b.right) / 2 - (h.left + h.right) / 2) < 1;
+    }), 'and sits on the same axis as the heading under it');
 
     // Ring on the M3U tab: tabs(0,1), m-name(2), m-url(3), m-epg(4), connect(5)
     await press(page, 'right');            // switch to the M3U tab
@@ -439,8 +487,33 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     ok(/Now on 0/.test(s.nowLines[0]), 'the first row shows what is on now',
        JSON.stringify(s.nowLines[0]));
-    ok(/Now on 0/.test(s.pmNow), 'the preview panel shows now/next for the focused channel',
+    /* Times only. The programme's name is the first row of the guide
+       directly underneath, and the panel was saying it twice. */
+    ok(/^\d\d:\d\d.\d\d:\d\d$/.test(s.pmNow.trim()),
+       'the preview panel gives the times of what is on', JSON.stringify(s.pmNow));
+    ok(!/Now on 0/.test(s.pmNow),
+       'and does not repeat the name the guide row below already carries',
        JSON.stringify(s.pmNow));
+    /* The logo stays — it went in beside the name and is not what came back
+       out. No channel in the fixture has one, so this drives both states
+       rather than asserting whichever one the fixture happens to be in. */
+    const pmLogo = await page.evaluate(() => {
+      const el = document.getElementById('pm-logo');
+      const off = { cls: el.className, bg: el.style.backgroundImage };
+      const c = window.Channels.channels()[0];
+      c.logo = 'data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+      window.Channels.onEpgReady();          // repaints the panel
+      const on = { cls: el.className, bg: el.style.backgroundImage };
+      delete c.logo;
+      window.Channels.onEpgReady();
+      return { off, on };
+    });
+    ok(/blank/.test(pmLogo.off.cls),
+       'a channel with no logo leaves no gap where one would go',
+       JSON.stringify(pmLogo.off));
+    ok(/url\(/.test(pmLogo.on.bg) && !/blank/.test(pmLogo.on.cls),
+       'and one with a logo shows it beside the name',
+       JSON.stringify(pmLogo.on));
     eq(s.pmName, 'Channel 0', 'the preview panel names the focused channel');
 
     await page.screenshot({ path: path.join(ROOT, 'shot-1-list.png') });
@@ -451,7 +524,7 @@ const state = page => page.evaluate(() => {
     await press(page, 'left');
     s = await state(page);
     eq(s.groups.slice(0, 3).map(g => g.replace(/^\d+/, '')),
-       ['All channels', 'Favourites', 'Recently watched'],
+       ['All channels', 'Favorites', 'Recently watched'],
        'the pinned groups come first');
     ok(s.groups.some(g => /G0$/.test(g)), 'the provider groups follow',
        JSON.stringify(s.groups.slice(3, 6)));
@@ -472,32 +545,64 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('search');
 
+    /* A window of its own, rather than a field at the top of the list. The
+       list underneath is left alone: an answer that arrives by rearranging
+       the thing you asked from reads as the app losing your channels. */
     await page.keyboard.press('g');        // green = search
-    ok(await page.evaluate(() => document.activeElement.id === 'search-input'),
-       'the green button focuses the search field');
+    await sleep(200);
+    ok(await page.evaluate(() =>
+      !document.getElementById('find').classList.contains('hidden')),
+      'the green button opens the search window');
+    ok(await page.evaluate(() => document.activeElement.id === 'find-input'),
+       'with the cursor already in the field');
+
+    const findRows = () => page.evaluate(() =>
+      [].slice.call(document.querySelectorAll('#find-list .fd-row')).map(r => ({
+        title: (r.querySelector('.fd-title') || {}).textContent,
+        sub: (r.querySelector('.fd-sub') || {}).textContent
+      })));
 
     await page.keyboard.type('Channel 4999');
-    await sleep(500);                      // input is debounced by 260 ms
-    s = await state(page);
-    eq(s.count, '1 / 1', 'searching narrows the list to a single match');
-    eq(s.names[0], 'Channel 4999', 'and it is the right channel');
+    await sleep(500);                      // the field is debounced
+    let found = await findRows();
+    eq(found.length, 1, 'one channel matches that exactly');
+    eq(found[0].title, 'Channel 4999', 'and it is the right one');
 
-    // Matching is a substring test, so a prefix pulls in its descendants:
-    // "Channel 123" also matches 1230-1239.
+    /* Matching is a substring test, so a prefix pulls in its descendants. */
     await page.keyboard.press('Control+A');
     await page.keyboard.type('Channel 123');
     await sleep(500);
-    s = await state(page);
-    eq(s.count, '1 / 11', 'a prefix matches every channel it is a substring of');
-    eq(s.names[0], 'Channel 123', 'the exact match is listed first');
+    found = await findRows();
+    eq(found.length, 11, 'a prefix matches every channel it is inside of');
+    eq(found[0].title, 'Channel 123', 'the exact match is listed first');
+
+    /* And the half that could not be asked for at all before: what is on.
+       The guide holds programmes titled "Now on 0", "Next on 0" and so on,
+       and none of those is the name of a channel. */
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('Next on');
+    await sleep(500);
+    found = await findRows();
+    ok(found.length > 0, 'programmes are searched too, not only channels',
+       JSON.stringify(found.slice(0, 3)));
+    ok(found.every(r => /Next on/.test(r.title)),
+       'every answer is a programme with those words in its title',
+       JSON.stringify(found.slice(0, 3)));
+    ok(/Channel \d/.test(found[0].sub),
+       'each says which channel it is on, because a title alone is not an answer',
+       found[0].sub);
+    ok(/\d\d:\d\d/.test(found[0].sub), 'and when', found[0].sub);
 
     await page.screenshot({ path: path.join(ROOT, 'shot-3-search.png') });
 
-    await press(page, 'back');             // leave the field
-    await press(page, 'back');             // clear the search
-    await sleep(400);
+    await press(page, 'back');             // close the window
+    await sleep(300);
+    ok(await page.evaluate(() =>
+      document.getElementById('find').classList.contains('hidden')),
+      'back closes it');
     s = await state(page);
-    eq(s.count, '1 / ' + CHANNELS, 'back clears the search');
+    eq(s.count, '1 / ' + CHANNELS,
+       'and the list underneath was never disturbed');
 
     /* ---------------------------------------------------------- */
     describe('favourites');
@@ -505,7 +610,7 @@ const state = page => page.evaluate(() => {
     await page.keyboard.press('r');        // red = favourite
     await sleep(150);
     s = await state(page);
-    ok(/favourites/i.test(s.toast), 'the red button reports the change', s.toast);
+    ok(/favorites/i.test(s.toast), 'the red button reports the change', s.toast);
     eq(s.stars, 1, 'a star appears on exactly one row');
 
     const starGeom = await page.evaluate(() => {
@@ -522,15 +627,24 @@ const state = page => page.evaluate(() => {
        starGeom && (starGeom.starMid + ' vs ' + starGeom.barMid));
     ok(starGeom && starGeom.starBottom <= starGeom.barTop + 1,
        'and sits above it');
-    ok(await page.evaluate(() => {
+    /* A star now, and still a shape rather than a character: no font on a
+       television is guaranteed to own the glyph. clip-path is what cuts
+       the points, so the test asks for that rather than for a colour on a
+       pseudo-element that no longer exists. */
+    const star = await page.evaluate(() => {
       const f = document.querySelector('#channel-list .ch-fav.on');
-      if (!f) return false;
-      const c = getComputedStyle(f, ':before').backgroundColor;
-      return /rgb\(\s*2[0-9]{2}|rgb\(\s*25[0-5]/.test(c) || c.indexOf('255') > -1;
-    }), 'and is drawn red rather than printed as a character');
+      if (!f) return null;
+      const cs = getComputedStyle(f);
+      return { clip: cs.clipPath || cs.webkitClipPath || '', bg: cs.backgroundColor };
+    });
+    ok(star && /polygon/.test(star.clip),
+       'the favourite mark is a star cut out of a box, not a character',
+       JSON.stringify(star));
+    ok(star && /^rgb/.test(star.bg) && star.bg !== 'rgba(0, 0, 0, 0)',
+       'and it is filled', JSON.stringify(star));
 
     await press(page, 'left');
-    await press(page, 'down');             // Favourites
+    await press(page, 'down');             // Favorites
     await press(page, 'right');
     s = await state(page);
     eq(s.count, '1 / 1', 'the favourites group holds the starred channel');
@@ -689,28 +803,51 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     ok(s.osd, 'and OK brings it back');
 
-    describe('right in fullscreen opens the channel panel');
+    describe('the arrows in fullscreen only ever move the picture');
 
-    /* Nothing is forward of live, so right never opened anything useful there;
-       it is the channel panel now, the same as it is in the list. */
-    await press(page, 'right');
-    await sleep(300);
-    let fsPanel = await page.evaluate(() => ({
-      shown: !document.getElementById('ctxmenu').classList.contains('hidden'),
-      items: [].slice.call(document.querySelectorAll('.cm-row')).map(x => (x.querySelector('.mi-label') || x).textContent.trim()),
-      seeking: !document.getElementById('osd-seek').classList.contains('hidden')
+    /* Right used to open a channel menu unless the player reported a
+       duration — one key doing two unrelated things, chosen by something a
+       provider said about a stream, and the menu won whenever the viewer
+       wanted the picture to move. There is no menu in fullscreen now.
+
+       This fixture is live with catch-up, so left winds back into it and
+       right winds forward again. Nothing either of them does opens a panel. */
+    await press(page, 'left');
+    await sleep(400);
+    const wound = await page.evaluate(() => ({
+      panel: !document.getElementById('ctxmenu').classList.contains('hidden'),
+      seeking: !document.getElementById('osd-seek').classList.contains('hidden'),
+      target: (document.getElementById('seek-target') || {}).textContent,
+      delta: (document.getElementById('seek-delta') || {}).textContent,
+      legend: getComputedStyle(document.querySelector('.osd-keys')).display
     }));
-    ok(fsPanel.shown, 'right opens the panel while watching', JSON.stringify(fsPanel));
-    eq(fsPanel.seeking, false, 'and never opens the scrubber at the live edge');
-    ok(fsPanel.items.some(i => /Leave full screen/.test(i)),
-       'it offers what makes sense fullscreen', JSON.stringify(fsPanel.items));
-    ok(!fsPanel.items.some(i => /Go full screen/.test(i)),
-       'and not what does not', JSON.stringify(fsPanel.items));
+    eq(wound.panel, false, 'left opens no panel');
+    ok(wound.seeking, 'it winds the picture back instead', JSON.stringify(wound));
+    ok(/-/.test(wound.delta || ''), 'and says how far back', JSON.stringify(wound));
+    eq(wound.legend, 'none',
+       'and the key legend is out of the way while it is being read');
 
+    await press(page, 'right');
+    await sleep(400);
+    const forward = await page.evaluate(() => ({
+      panel: !document.getElementById('ctxmenu').classList.contains('hidden'),
+      delta: (document.getElementById('seek-delta') || {}).textContent,
+      edge: !!document.getElementById('osd-edge')
+    }));
+    eq(forward.panel, false, 'and right opens no panel either');
+    eq(forward.edge, false, 'there is no tab on the right of the bar any more');
+    ok(wound.delta !== forward.delta,
+       'right winds it forward from where left left it',
+       JSON.stringify([wound.delta, forward.delta]));
+
+    /* Back takes the scrub off rather than the picture. */
     await press(page, 'back');
-    await sleep(250);
+    await sleep(300);
     s = await state(page);
-    ok(s.playingFull, 'back closes the panel and leaves the picture alone');
+    ok(s.playingFull, 'back cancels the scrub and leaves the picture alone');
+    eq(await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.osd-keys')).display),
+      'block', 'and the legend comes back with the scrubber gone');
 
     /* ---------------------------------------------------------- */
     describe('leaving fullscreen for another screen');
@@ -797,6 +934,16 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     eq(s.tsShown, false, 'no broadcast-time readout while live');
 
+    /* Right, on the live edge, has nowhere to go: a scrubber opened there
+       would only land back where it started, which reads as the key being
+       ignored. The bar comes up instead, which is what pressing anything on
+       a live channel is after anyway. */
+    await press(page, 'right');
+    await sleep(200);
+    s = await state(page);
+    eq(s.seeking, false, 'right on the live edge opens no scrubber');
+    ok(s.osd, 'it shows the info bar instead');
+
     await press(page, 'left');
     await sleep(200);
     s = await state(page);
@@ -827,6 +974,25 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     const fill3 = parseFloat(s.seekFill);
     ok(fill3 > fill2, 'right moves it back toward live', fill2 + '% -> ' + fill3 + '%');
+
+    /* And it stops there. The knob reaches the right-hand end in a few more
+       presses, and the ones after that used to be accepted anyway — each one
+       restarting the commit timer against a stop that could not move, so
+       leaning on the key at live sat doing nothing instead of going live.
+       Nothing repaints now, which is why the width is unchanged to the
+       character rather than merely close. */
+    await press(page, 'right', 8);
+    await sleep(150);
+    s = await state(page);
+    ok(s.seeking, 'the scrubber is still open, wound forward', JSON.stringify(s.seekDelta));
+    eq(s.seekDelta, 'Live', 'and it has reached the live edge');
+    const atLive = s.seekFill;
+
+    await press(page, 'right', 3);
+    await sleep(150);
+    s = await state(page);
+    eq(s.seekFill, atLive, 'further presses do not push it past live');
+    eq(s.seekDelta, 'Live', 'and it is still sitting on the edge');
 
     await press(page, 'back');             // cancel, do not commit
     await sleep(250);
@@ -885,20 +1051,33 @@ const state = page => page.evaluate(() => {
     /* On the channel number's own line, not on one above the channel name.
        The bar is a ranking — number, name, what is on — and a button that
        takes a line of its own pushes the name down and reads as part of it. */
+    /* On the right of the line above the progress bar, which is the line
+       that says how much of the programme is left — the thing it is about.
+       It used to sit on the channel number line, three rows away from the
+       bar, and out of the way of the one number that makes you want it. */
     const line = await page.evaluate(() => {
-      const n = document.getElementById('osd-num').getBoundingClientRect();
       const b = document.getElementById('osd-back').getBoundingClientRect();
-      const name = document.getElementById('osd-name').getBoundingClientRect();
+      const now = document.getElementById('osd-now').getBoundingClientRect();
+      const bar = document.getElementById('osd-bar-fill')
+                    .parentNode.getBoundingClientRect();
+      /* By class, not id: one of the three ways the bar paints this line
+         writes the span without an id on it. */
+      const leftEl = document.querySelector('.osd-left');
+      const left = leftEl ? leftEl.getBoundingClientRect() : b;
       return {
-        offLine: Math.round((b.top + b.height / 2) - (n.top + n.height / 2)),
-        gap: Math.round(b.left - n.right),
-        clearOfName: name.top >= b.bottom - 2
+        onNowLine: Math.round((b.top + b.height / 2) - (now.top + now.height / 2)),
+        aboveBar: Math.round(bar.top - b.bottom),
+        rightmost: Math.round(b.right - left.right),
+        toRight: Math.round(b.left - now.left)
       };
     });
-    ok(Math.abs(line.offLine) < 8, 'on the channel number line, not below it',
+    ok(Math.abs(line.onNowLine) < 12, 'on the line that says how much is left',
        JSON.stringify(line));
-    ok(line.gap > 0, 'to the right of the number', JSON.stringify(line));
-    ok(line.clearOfName, 'and above the channel name rather than over it',
+    ok(line.aboveBar > -6, 'which is the line above the progress bar',
+       JSON.stringify(line));
+    ok(line.rightmost >= 0, 'and it is the rightmost thing on it',
+       JSON.stringify(line));
+    ok(line.toRight > 200, 'over on the right rather than beside the times',
        JSON.stringify(line));
 
 
@@ -1025,7 +1204,11 @@ const state = page => page.evaluate(() => {
     await sleep(250);
     s = await state(page);
     eq(s.playingFull, false, 'a second back leaves fullscreen');
-    eq(s.focusedName, away, 'and the cursor is left where it was');
+    /* And lands on what is playing, not on whatever row the list was left
+       on. Somebody browses to channel 400, opens 54 full screen and comes
+       back: the list they want is the one with 54 in it, and the guide
+       panel underneath was describing a channel nobody was watching. */
+    eq(s.focusedName, 'Channel 54', 'and the cursor comes back to what is playing');
     eq(s.badge, 'Channel 54', 'with playback untouched throughout');
 
     /* With nothing playing it falls back to the row under the cursor. 413 is
@@ -1040,6 +1223,12 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     eq(s.badge, '', 'stop clears the preview');
 
+    /* The cursor followed the picture, so getting back to the row this part
+       of the run is about takes going there again. */
+    await press(page, 'down', 12);
+    await sleep(200);
+    eq((await state(page)).focusedName, away, 'back down to a row that is not playing');
+
     await press(page, 'p');
     await sleep(500);
     s = await state(page);
@@ -1048,9 +1237,11 @@ const state = page => page.evaluate(() => {
 
     /* Put the run back where it was: Channel 54 playing, cursor on its row.
        Two backs, because the bar came up with fullscreen and back peels it
-       off before the picture. */
+       off before the picture — and leaving fullscreen now brings the cursor
+       to whatever is playing, so there is no walking back to do. */
     await press(page, 'back');
     await press(page, 'back');
+    await sleep(300);
     await press(page, 'up', 12);
     await press(page, 'ok');
     await sleep(400);
@@ -1061,7 +1252,37 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('the left-arrow menu');
 
+    /* One sign at a time, and it points at whatever left opens next. From
+       the list that is the folded rail; from inside the rail it is the
+       drawer, which is a panel further left again and had nothing saying
+       so. The rail gives it 26px of its own left edge to stand in. */
+    const signs = () => page.evaluate(() => {
+      const box = e => { const r = e.getBoundingClientRect();
+                         return { left: r.left, mid: (r.left + r.right) / 2 }; };
+      return {
+        rail: getComputedStyle(document.querySelector('.edge-rail')).display,
+        drawer: getComputedStyle(document.querySelector('.edge-drawer')).display,
+        row: box(document.querySelector('.group-row')),
+        logo: box(document.getElementById('rail-logo')),
+        scroller: box(document.getElementById('group-scroller'))
+      };
+    });
+
+    const onList = await signs();
+    eq([onList.rail, onList.drawer], ['block', 'none'],
+       'from the list the left sign points at the folded rail');
+
     await press(page, 'left');             // channels -> groups
+    await sleep(200);
+    const inRail = await signs();
+    eq([inRail.rail, inRail.drawer], ['none', 'block'],
+       'and from inside the rail it points at the drawer behind it');
+    ok(inRail.row.left >= 26, 'the rail keeps its own rows off that sign',
+       'a row starts at ' + Math.round(inRail.row.left) + 'px');
+    ok(Math.abs(inRail.logo.mid - inRail.scroller.mid) < 1,
+       'and its wordmark stays centred on what is under it',
+       inRail.logo.mid + ' vs ' + inRail.scroller.mid);
+
     await press(page, 'left');             // groups -> menu
     await sleep(250);
     s = await state(page);
@@ -1074,7 +1295,7 @@ const state = page => page.evaluate(() => {
     /* And not the two the rail already has. The drawer is reached by going
        left past the rail, so a row here that jumps to a group on it offers to
        send somebody back through the thing they just walked through. */
-    ['Favourites', 'Recently watched'].forEach(function (item) {
+    ['Favorites', 'Recently watched'].forEach(function (item) {
       eq(s.menuItems.indexOf(item), -1, 'and leaves ' + item + ' to the rail it is on',
          JSON.stringify(s.menuItems));
     });
@@ -1116,7 +1337,7 @@ const state = page => page.evaluate(() => {
        'and the picture comes back with the screen');
 
     /* ---------------------------------------------------------- */
-    describe('the TV catalogue');
+    describe('the TV catalog');
 
     const cat = () => page.evaluate(() => {
       const q = id => document.getElementById(id);
@@ -1135,8 +1356,11 @@ const state = page => page.evaluate(() => {
           focused: r.classList.contains('focused'),
           playing: r.classList.contains('playing')
         })),
-        days: progs.filter(p => p.className.indexOf('cg-day') > -1)
-          .map(p => p.textContent),
+        days: [].slice.call(q('cg-days').children).map(d => d.textContent),
+        dayIdx: [].slice.call(q('cg-days').children)
+          .findIndex(d => d.classList.contains('selected')),
+        dayFocused: [].slice.call(q('cg-days').children)
+          .findIndex(d => d.classList.contains('focused')),
         progs: progs.filter(p => p.className.indexOf('cg-prog') > -1).map(p => ({
           time: p.querySelector('.cg-ptime').textContent,
           name: p.querySelector('.cg-pname').textContent,
@@ -1152,7 +1376,7 @@ const state = page => page.evaluate(() => {
     await press(page, 'left');             // groups -> menu
     await sleep(250);
     s = await state(page);
-    const catRow = s.menuItems.indexOf('TV catalogue');
+    const catRow = s.menuItems.indexOf('TV catalog');
     ok(catRow > -1, 'the drawer offers the catalogue', JSON.stringify(s.menuItems));
 
     await press(page, 'down', catRow);
@@ -1187,7 +1411,16 @@ const state = page => page.evaluate(() => {
     eq(c.title, chosen.name, 'the right-hand side is headed with the channel');
     ok(c.progs.length > 5, 'and holds its schedule, not a window on it',
        c.progs.length + ' programmes');
-    ok(c.days.length > 0, 'broken up by day', JSON.stringify(c.days));
+    /* The days the guide covers, as a strip to choose from — picking the day
+       first beats scrolling past today to reach tomorrow. */
+    ok(c.days.length > 0, 'the days it covers are offered as a strip',
+       JSON.stringify(c.days));
+    ok(c.days.indexOf('Today') > -1, 'today among them', JSON.stringify(c.days));
+    ok(c.dayIdx > -1, 'with one of them selected', String(c.dayIdx));
+    /* And the list under it is that day only, which is the filtering. */
+    const shownDay = c.days[c.dayIdx];
+    ok(c.progs.length > 0, 'and the schedule under it is that day',
+       shownDay + ': ' + c.progs.length + ' programmes');
     ok(c.progs.some(p => p.now), 'with what is on air marked',
        JSON.stringify(c.progs.filter(p => p.now)));
     ok(c.progs.some(p => p.past), 'and what has already been on');
@@ -1266,6 +1499,45 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('the guide panel is a place again');
 
+    /* Where in the nine you are used to be marked down the scroller's
+       right-hand padding — the same 26px of screen the right-edge sign
+       stands on, and that sign is drawn over the top of it. So the marker
+       was there and could not be seen. */
+    const ruler = await page.evaluate(() => {
+      const t = document.querySelector('.epg-track').getBoundingClientRect();
+      const e = document.querySelector('.edge-right').getBoundingClientRect();
+      const p = document.querySelector('.epg-panel').getBoundingClientRect();
+      return { clear: t.right <= e.left, fromLeft: Math.round(t.left - p.left) };
+    });
+    ok(ruler.clear, 'the guide ruler is clear of the right-edge sign');
+    ok(ruler.fromLeft < 30, 'because it runs down the left of the panel instead',
+       ruler.fromLeft + 'px in from the left');
+
+    /* The clock is a column somebody scans rather than reads. */
+    const clock = await page.evaluate(() => {
+      const cs = getComputedStyle(document.querySelector('.epg-time'));
+      return { size: parseFloat(cs.fontSize), weight: Number(cs.fontWeight) };
+    });
+    ok(clock.size >= 22, 'the guide clock is a size up', clock.size + 'px');
+    ok(clock.weight >= 600, 'and bold', String(clock.weight));
+
+    /* And the column is as wide as the widest clock it can be asked to
+       hold. 12:38pm on the on-air row is 87px, and the column was 80 —
+       so a twelve-hour clock ran into the programme beside it. */
+    const overflowed = await page.evaluate(() => {
+      const out = [];
+      [].slice.call(document.querySelectorAll('.epg-time')).forEach(t => {
+        const was = t.textContent;
+        t.textContent = '12:38pm';
+        if (t.scrollWidth > t.clientWidth) {
+          out.push(t.scrollWidth + ' needed, ' + t.clientWidth + ' given');
+        }
+        t.textContent = was;
+      });
+      return out;
+    });
+    eq(overflowed, [], 'and the column fits a twelve-hour clock');
+
     /* Asked for rather than assumed: a new install opens on "now at the top",
        and the centred window is what the next several assertions are about. */
     await page.evaluate(() => {
@@ -1275,18 +1547,27 @@ const state = page => page.evaluate(() => {
     await sleep(300);
 
     s = await state(page);
-    eq(s.guide.length, 9, 'centred, the panel holds nine programmes');
-    eq(s.guideNowIdx, 4, 'the one on air is the fifth of them: four behind, four ahead');
+    eq(s.guide.length, 10, 'centred, the panel holds ten programmes');
+    /* At least four behind it, which is what makes the panel a place you
+       can look back from rather than a countdown. Exactly where it lands
+       depends on how much past the provider gave us — this fixture has
+       less than the window can hold, so the window cannot slide. */
+    ok(s.guideNowIdx >= 4, 'the one on air has the past above it',
+       String(s.guideNowIdx));
     eq(s.guideCentred, 0, 'and sits on the exact middle of the five on screen');
-    eq(s.guideReplayable, 4, 'the finished ones the provider still holds are marked replayable');
-    ok(!s.guide.some(g => /Two days ago/.test(g)),
-       'so nothing beyond those nine is in it', JSON.stringify(s.guide));
-    ok(/Six hours ago on 5/.test(s.guide[0]) && /This evening on 5/.test(s.guide[8]),
-       'counted, not measured: these nine span -6h to +7h',
-       JSON.stringify(s.guide));
+    eq(s.guideReplayable, 5, 'the finished ones the provider still holds are marked replayable');
+    /* Counted, not measured: ten rows whatever they span. This fixture's
+       channel has exactly ten programmes in it, so a ten-row panel is all
+       of them, back to the one from two days ago — on a real provider's
+       listings ten rows is a few hours either side of now. That is the
+       point of counting rather than measuring: the panel holds the same
+       amount whether programmes are half an hour long or three. */
+    eq(s.guide.length, 10, 'ten rows, however long the programmes are');
+    ok(/This evening on 5/.test(s.guide[9]),
+       'and it reaches into the evening ahead', JSON.stringify(s.guide));
 
     /* Settings -> Guide panel. "Now at the top" is the default and turns the
-       same nine rows into nine of schedule instead of four. */
+       same ten rows into ten of schedule instead of four. */
     const panelShape = () => page.evaluate(() => {
       const rows = [].slice.call(document.querySelectorAll('#epg-list .epg-row'));
       const box = document.getElementById('epg-scroller').getBoundingClientRect();
@@ -1302,7 +1583,7 @@ const state = page => page.evaluate(() => {
     });
 
     const centred = await panelShape();
-    eq(centred.nowIdx, 4, 'centred: the row on air is the fifth of nine');
+    eq(centred.nowIdx, 5, 'centred: the row on air, with the past above it');
     eq(centred.offCentre, 0, 'and sits on the middle of the panel');
     ok(centred.past > 0, 'with what has just been on above it', centred.past + ' finished');
 
@@ -1324,9 +1605,9 @@ const state = page => page.evaluate(() => {
       window.App.onSettingChanged('settings.guideView');
     });
     await sleep(300);
-    eq((await panelShape()).nowIdx, 4, 'and back to the middle');
+    eq((await panelShape()).nowIdx, 5, 'and back to the middle');
 
-    /* Five rows of the nine are on screen; the rest are a scroll away. */
+    /* Five rows of the ten are on screen; the other five are a scroll away. */
     const shownRows = () => page.evaluate(() => {
       const box = document.getElementById('epg-scroller').getBoundingClientRect();
       return [].slice.call(document.querySelectorAll('#epg-list .epg-row'))
@@ -1365,17 +1646,17 @@ const state = page => page.evaluate(() => {
          (document.querySelector('#epg-list .epg-row.focused .epg-name') || {}).textContent),
        'Now on 5', 'on the programme that is on air');
 
-    /* The other four are a scroll away — which is the whole point of holding
-       nine and showing five. */
-    await press(page, 'up', 4);
+    /* The other five are a scroll away — which is the whole point of holding
+       ten and showing five. */
+    await press(page, 'up', 5);
     await sleep(300);
     const atTop = await shownRows();
     eq(atTop.length, 5, 'still five on screen after scrolling');
-    ok(/Six hours ago on 5/.test(atTop[0]),
-       'four presses up reach the oldest of the nine', JSON.stringify(atTop));
+    ok(/Two days ago on 5/.test(atTop[0]),
+       'five presses up reach the oldest the panel holds', JSON.stringify(atTop));
     eq(await page.evaluate(() =>
          (document.querySelector('#epg-list .epg-row.focused .epg-name') || {}).textContent),
-       'Six hours ago on 5', 'with the cursor on it');
+       'Two days ago on 5', 'with the cursor on it');
     ok(!atTop.some(t => /This evening/.test(t)),
        'and the far end has scrolled out of sight', JSON.stringify(atTop));
 
@@ -1387,13 +1668,34 @@ const state = page => page.evaluate(() => {
     ok(!atEnd.some(t => /Six hours ago/.test(t)),
        'and the near end has gone the other way', JSON.stringify(atEnd));
 
-    await press(page, 'up', 4);            // back to the one on air
-    await sleep(250);
+    /* To a named row, rather than by counting keystrokes. How many rows the
+       panel holds is a setting; a test that walks a fixed number of presses
+       breaks every time that number moves, which is how this one spent its
+       morning. */
+    const focusGuideRow = async (title) => {
+      /* Worked out, not felt for. Walking up until something matches runs
+         off the top of the panel, and out of the top is back to the channel
+         list — after which every further press is moving the wrong cursor
+         entirely, which is a confusing way for a test to fail. */
+      const where = await page.evaluate((t) => {
+        const rows = [].slice.call(document.querySelectorAll('#epg-list .epg-row'));
+        const names = rows.map(r => ((r.querySelector('.epg-name') || {}).textContent || ''));
+        return {
+          at: rows.findIndex(r => r.classList.contains('focused')),
+          want: names.indexOf(t)
+        };
+      }, title);
+      if (where.at < 0 || where.want < 0) return false;
+      const d = where.want - where.at;
+      if (d) await press(page, d > 0 ? 'down' : 'up', Math.abs(d));
+      return true;
+    };
+    ok(await focusGuideRow('Next on 5'),
+       'the panel can be walked to a row by name');
+    await sleep(200);
 
     /* OK does what the programme allows, and for one that has not started yet
        that is: say when it does. */
-    await press(page, 'down');
-    await sleep(200);
     await press(page, 'ok');
     await sleep(300);
     const reminded = await page.evaluate(() => ({
@@ -1457,6 +1759,11 @@ const state = page => page.evaluate(() => {
     eq(dlg.descShown, true, 'and shows it');
     eq(dlg.logoShown, true, 'with the channel logo beside it');
 
+    /* The cursor starts on the safe answer now — every question asked
+       through U.confirm is one where yes costs something, and a reminder
+       popping up over what you are watching should not change the channel
+       by default. So: across to it first. */
+    await press(page, 'right');
     await press(page, 'ok');               // Go to channel
     await sleep(700);
     s = await state(page);
@@ -1581,6 +1888,7 @@ const state = page => page.evaluate(() => {
        'and what it offers is a swap',
        await page.evaluate(() => document.getElementById('confirm-text').textContent));
 
+    await press(page, 'right');            // No is where the cursor starts
     await press(page, 'ok');               // yes
     await sleep(500);
     s = await state(page);
@@ -1659,23 +1967,66 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('the action bar and the keyboard reference');
 
-    /* INFO is on the bar because it is the one press that opens the guide
-       panel, and nothing on screen said so. Still a legend for the remote:
-       the PC keys that stand in for these are listed by H instead. */
+    /* The guide panel is on the blue button, not INFO. On a real remote INFO
+       belongs to the television — it opens the set's own banner and takes the
+       viewer out of the app — so the bar shows a colour, the way the other
+       three coloured shortcuts do. Still a legend for the remote: the PC keys
+       that stand in for these are listed by H instead. */
     eq(await page.evaluate(() =>
       [].slice.call(document.querySelectorAll('.action-bar .act')).map(e => e.textContent.trim())),
-      ['OKPlay', 'Full screen', 'INFOSchedule', 'Favourite', 'Search', 'Settings'],
+      ['Full screen', 'Main menu', 'Channel menu', 'Favorite', 'Search', 'Settings', 'Schedule'],
       'the bar is a legend for the remote, with no PC keys on it');
 
     eq(await page.evaluate(() => document.querySelectorAll('.action-bar .kb').length), 0,
        'the keycaps are gone: this build is for a TV');
 
-    const bar = await page.evaluate(() => {
+    /* It says what it is. */
+    eq(await page.evaluate(() =>
+      (document.querySelector('.act-label') || {}).textContent),
+      'Shortcuts:', 'and it is headed, so the colours are not a guess');
+
+    /* And it fits in BOTH states, which is the assertion that was missing.
+       The bar clips rather than wraps, and with the rail out it has 600px
+       rather than 854 — the label went in, took 90 of them, and the last
+       shortcut lost its word with every test still passing. */
+    const barIn = async () => page.evaluate(() => {
       const b = document.querySelector('.action-bar');
-      return { client: b.clientWidth, scroll: b.scrollWidth };
+      const l = document.querySelector('.act-label');
+      return { client: b.clientWidth, scroll: b.scrollWidth,
+               label: l ? getComputedStyle(l).display : 'gone' };
     });
+
+    const bar = await barIn();
     ok(bar.scroll <= bar.client, 'and the whole bar fits its pane',
        bar.scroll + 'px of content in ' + bar.client + 'px');
+
+    await press(page, 'left');              // the rail takes 254px of it
+    await sleep(250);
+    const barNarrow = await barIn();
+    ok(barNarrow.scroll <= barNarrow.client,
+       'and still fits with the rail out, where it is 254px narrower',
+       barNarrow.scroll + 'px of content in ' + barNarrow.client + 'px');
+    /* The two arrows are what give way there. With the rail out the bar
+       has 600px rather than 854, which will not hold seven entries at a size
+       worth reading — and those two describe what left and right do from the
+       channel list, which is not where the cursor is when the rail is out. */
+    eq(barNarrow.label, 'inline-block', 'the heading stays');
+    eq(await page.evaluate(() =>
+      [].slice.call(document.querySelectorAll('.act-arrow'))
+        .map(a => getComputedStyle(a).display)),
+      ['none', 'none'], 'and the two arrows are what step aside to make it fit');
+
+    /* Back to the channel list, and checked rather than assumed: one right
+       is only the opposite of one left if the cursor started in the list.
+       It does not always, and a test that leaves the cursor one pane over
+       fails a different test thirty tests later. */
+    for (let i = 0; i < 4; i++) {
+      if (await page.evaluate(() => !!document.querySelector('.ch-row.focused'))) break;
+      await press(page, 'right');
+      await sleep(200);
+    }
+    ok(await page.evaluate(() => !!document.querySelector('.ch-row.focused')),
+       'and the cursor is back on the list it started on');
 
     const badgeBefore = (await state(page)).badge;
     await page.keyboard.press('h');
@@ -1826,6 +2177,25 @@ const state = page => page.evaluate(() => {
     /* ---------------------------------------------------------- */
     describe('the channel panel on the right');
 
+    /* On the browse screen, with the cursor on a channel. Both of those were
+       assumed rather than arranged: the catch-up browser above leaves the
+       picture fullscreen, and right opened this panel from there too, so
+       this passed for years while testing the wrong screen. */
+    const onBrowseList = async () => {
+      for (let i = 0; i < 5; i++) {
+        const at = await page.evaluate(() => ({
+          full: document.getElementById('stage').classList.contains('playing-full'),
+          row: !!document.querySelector('.ch-row.focused'),
+          ctx: !document.getElementById('ctxmenu').classList.contains('hidden')
+        }));
+        if (!at.full && at.row && !at.ctx) return true;
+        await press(page, at.full || at.ctx ? 'back' : 'right');
+        await sleep(250);
+      }
+      return false;
+    };
+    ok(await onBrowseList(), 'the browse screen, with the cursor on a channel');
+
     await press(page, 'right');
     await sleep(300);
     let cm = await page.evaluate(() => {
@@ -1860,7 +2230,7 @@ const state = page => page.evaluate(() => {
 
     // Drive the warning by hand: the drift sampler needs real stalled playback.
     await page.evaluate(() => {
-      document.getElementById('stall-text').textContent = 'Stream is behind  9s';
+      document.getElementById('stall-text').textContent = 'Stream is behind  12s';
       document.getElementById('stall-warn').classList.remove('hidden');
     });
     s = await state(page);
@@ -1878,6 +2248,51 @@ const state = page => page.evaluate(() => {
     eq(s.main, true, 'back on the browse screen');
 
     /* ---------------------------------------------------------- */
+    describe('the rail lights one thing at a time');
+
+    /* Settings sits at the foot of the group rail, past the end of the
+       list. Moving on to it left the group above still drawn as the cursor,
+       because the paint asked whether the pane was the rail and never
+       whether the cursor had gone past the end of it — so two things on
+       screen claimed to be the cursor at once. */
+    await press(page, 'left');              // into the rail
+    const railWalk = await page.evaluate(async () => {
+      const key = (code) => {
+        const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+        Object.defineProperty(e, 'keyCode', { get: () => code });
+        Object.defineProperty(e, 'which', { get: () => code });
+        document.dispatchEvent(e);
+      };
+      const shot = () => ({
+        groups: document.querySelectorAll('#group-list .group-row.focused').length,
+        selected: document.querySelectorAll('#group-list .group-row.selected').length,
+        foot: document.getElementById('rail-settings').classList.contains('focused')
+      });
+      const before = shot();
+      /* Down past the end of the groups, on to Settings. */
+      let downs = 0;
+      for (let i = 0; i < 40; i++) {
+        key(40); downs++;
+        if (document.getElementById('rail-settings').classList.contains('focused')) break;
+      }
+      const after = shot();
+      /* And back where it started, because everything below this reads the
+         list the rail is showing. */
+      for (let i = 0; i < downs; i++) key(38);
+      return { before, after, downs };
+    });
+    ok(railWalk.before.groups === 1 && !railWalk.before.foot,
+       'in the list, the group under the cursor is the lit one',
+       JSON.stringify(railWalk.before));
+    ok(railWalk.after.foot, 'and the foot of the rail can be reached',
+       JSON.stringify(railWalk.after));
+    eq(railWalk.after.groups, 0,
+       'which unlights the group, so only one thing is the cursor');
+    eq(railWalk.after.selected, 1,
+       'though it stays marked as the list being shown, which is a different thing');
+    await press(page, 'right');             // back to the channels
+
+    /* ---------------------------------------------------------- */
     describe('settings');
 
     await page.keyboard.press('y');        // yellow = settings
@@ -1885,6 +2300,114 @@ const state = page => page.evaluate(() => {
     s = await state(page);
     ok(s.settings, 'the yellow button opens settings');
     await page.screenshot({ path: path.join(ROOT, 'shot-settings.png') });
+
+    /* The window follows the cursor and keeps its distance — the channel
+       list's rule, which is what this was asked to feel like. Two rows of
+       margin means the option under the cursor is never the last one on
+       screen, so the list does not run out underneath you. */
+    const scrolled = await page.evaluate(async () => {
+      const key = (code) => {
+        const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+        Object.defineProperty(e, 'keyCode', { get: () => code });
+        Object.defineProperty(e, 'which', { get: () => code });
+        document.dispatchEvent(e);
+      };
+      const inner = document.getElementById('settings-inner');
+      const all = () => document.querySelectorAll('#settings-inner .set-row');
+      const pitch = all()[1].offsetTop - all()[0].offsetTop;
+      const box = document.getElementById('settings-list').clientHeight;
+      const vis = Math.floor(box / pitch);
+      const topRow = () => {
+        const m = inner.style.transform.match(/-?[\d.]+/);
+        return Math.round(Math.abs(m ? parseFloat(m[0]) : 0) / pitch);
+      };
+      const cursor = () => [].slice.call(all())
+        .findIndex(r => r.classList.contains('focused'));
+      const walk = [];
+      for (let i = 0; i < 16; i++) { walk.push({ top: topRow(), at: cursor() }); key(40); }
+      const downEnd = { top: topRow(), at: cursor(), rows: all().length };
+      for (let i = 0; i < 22; i++) key(38);
+      const upEnd = { top: topRow(), at: cursor() };
+      return { walk, downEnd, upEnd, vis, rows: all().length };
+    });
+
+    /* Every step: either the cursor is two clear rows from both edges of the
+       window, or the window is against an end of the list and cannot move
+       further. */
+    const bad = scrolled.walk.filter(p => {
+      const fromTop = p.at - p.top;
+      const fromBottom = (p.top + scrolled.vis - 1) - p.at;
+      const atStart = p.top === 0 && fromTop < 2;
+      const atEnd = p.top >= scrolled.rows - scrolled.vis && fromBottom < 2;
+      return !(fromTop >= 2 || atStart) || !(fromBottom >= 2 || atEnd);
+    });
+    eq(bad.length, 0,
+       'the cursor is never nearer than two rows to an edge of the window');
+    ok(scrolled.walk.some(p => p.top > 0),
+       'and the window does move', JSON.stringify(scrolled.walk.map(p => p.top)));
+    ok(scrolled.walk.every((p, i) => i === 0 || p.top - scrolled.walk[i - 1].top <= 1),
+       'a row at a time, not a jump',
+       JSON.stringify(scrolled.walk.map(p => p.top)));
+    eq(scrolled.upEnd.top, 0, 'going back up reaches the very top');
+    eq(scrolled.upEnd.at, 0, 'with the cursor on the first option');
+
+    /* The list slides; it does not jump.
+
+       Its transform has carried a transition all along and never once ran
+       one: paint() replaced the whole container, so every repaint handed
+       the browser a new element already sitting at its final offset. A run
+       of rows divided by hairlines got away with that. A column of separate
+       bubbles moving ninety pixels between two frames reads as the whole
+       screen leaping, which is how it was reported. The container has to
+       survive a repaint for the transition to have anything to animate. */
+    const slide = await page.evaluate(() => {
+      const before = document.getElementById('settings-inner');
+      const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'keyCode', { get: () => 40 });
+      Object.defineProperty(e, 'which', { get: () => 40 });
+      document.dispatchEvent(e);
+      const after = document.getElementById('settings-inner');
+      return {
+        same: before === after,
+        moves: /transform/.test(getComputedStyle(after).transitionProperty),
+        secs: getComputedStyle(after).transitionDuration
+      };
+    });
+    ok(slide.same, 'the list container survives a repaint',
+       'replaced every keypress, its transition never runs and the list jumps');
+    /* And it moves without an animation, the way the channel list does — one
+       row at a time is not far enough for a transition to be anything but
+       late. */
+    ok(!slide.moves || /^0s/.test(slide.secs),
+       'and it moves without one, like the channel list', slide.secs);
+
+    /* That check moved the cursor, and everything below counts rows from
+       the top of the list. Put it back. */
+    await press(page, 'up');
+
+    /* And it says there is more of it than fits. The marker fades in, so
+       let it. */
+    await sleep(250);
+    const more = await page.evaluate(() => {
+      const box = document.getElementById('settings-list');
+      const thumb = document.getElementById('settings-thumb');
+      const rows = document.querySelectorAll('#settings-inner .set-row').length;
+      const pitch = rows > 1 ? (document.querySelectorAll('#settings-inner .set-row')[1].offsetTop -
+                               document.querySelectorAll('#settings-inner .set-row')[0].offsetTop) : 0;
+      return {
+        rows, fits: Math.floor(box.clientHeight / (pitch || 1)),
+        marked: box.classList.contains('scrolls'),
+        thumbH: thumb ? thumb.style.height : '',
+        shown: thumb ? getComputedStyle(thumb.parentNode).opacity : '0'
+      };
+    });
+    ok(more.rows > more.fits, 'there are more settings than the box shows',
+       JSON.stringify(more));
+    ok(more.marked && more.shown === '1',
+       'so the list shows that there is more below', JSON.stringify(more));
+    ok(/%$/.test(more.thumbH) && parseFloat(more.thumbH) < 100,
+       'and the marker is shorter than its track, which is what says so',
+       more.thumbH);
 
     const setRows = await page.evaluate(() =>
       [].slice.call(document.querySelectorAll('#settings-list .set-row .set-label'))
@@ -1962,7 +2485,11 @@ const state = page => page.evaluate(() => {
       const v = document.querySelector('#video-layer video');
       return v ? getComputedStyle(v).objectFit : null;
     });
-    eq(fitDefault, 'cover', 'Fill (crop) is what a new install gets');
+    /* Letterbox, not crop. They are the same picture on the 16:9 nearly
+       everything is; where they differ — a 4:3 channel, a film in 2.39:1 —
+       fill throws away the edges of the frame, and a default should not
+       quietly cut the top off somebody's film. */
+    eq(fitDefault, 'contain', 'Fit (letterbox) is what a new install gets');
     eq(await fitFor('fit'), 'contain', 'Fit shows the whole picture instead');
     eq(await fitFor('stretch'), 'fill', 'and Stretch pulls it to the box');
     eq(await fitFor('fill'), 'cover', 'back to Fill');
@@ -2211,6 +2738,7 @@ const state = page => page.evaluate(() => {
     eq(swap.open, true, 'a number already in use asks first');
     ok(/Swap their numbers/.test(swap.text), 'offering to trade places', swap.text);
 
+    await press(page, 'right');            // No is where the cursor starts
     await press(page, 'ok');               // yes, swap
     await sleep(400);
     const traded = await page.evaluate(name => {
@@ -2500,6 +3028,191 @@ const state = page => page.evaluate(() => {
     await press(page, 'back');             // then fullscreen
     await page.evaluate(() => { window.Store.set('settings.theme', 'dark'); window.U.applyTheme(); });
     await sleep(200);
+
+    /* ---------------------------------------------------------- */
+    describe('scrolling one row rewrites one row');
+
+    /* The pool binds a node to the row it is showing, not to its place in
+       the window. Bound the other way — which is how this started — moving
+       down by one shifted every node's index by one and rewrote all
+       eighteen, and rewriting a row means measuring and shaping its text
+       again. Chrome's own counters put that at 9.7ms of layout per keypress
+       against 2ms of script; binding by row halved it.
+
+       Far enough down the list that the panel is really scrolling: near the
+       top the cursor moves inside the viewport and nothing is rebound. */
+    await press(page, 'down', 12);
+    const rebinds = await page.evaluate(() => {
+      const shown = () => [].slice.call(
+        document.querySelectorAll('#channel-list .ch-row'))
+        .map(r => { const n = r.querySelector('.ch-name'); return n ? n.textContent : ''; });
+      const before = shown();
+      const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'keyCode', { get: () => 40 });
+      Object.defineProperty(e, 'which', { get: () => 40 });
+      document.dispatchEvent(e);
+      const after = shown();
+      let changed = 0;
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) changed++;
+      return { changed, rows: before.length };
+    });
+    ok(rebinds.rows > 10, 'the list is a pool of rows', JSON.stringify(rebinds));
+    ok(rebinds.changed <= 1,
+       'and scrolling one row rewrites at most one of them',
+       rebinds.changed + ' of ' + rebinds.rows +
+       ' rewritten — every row rewritten means the pool is bound to the' +
+       ' window instead of to the rows');
+
+    /* ---------------------------------------------------------- */
+    describe('several channels failing is not several channel problems');
+
+    /* Watched a real provider 404 all 127 channels for a stretch. The app
+       reported that as a channel being offline, once per channel, which is
+       the wrong story: the difference between "this one is off" and
+       "nothing is playing" is the difference between trying the next
+       channel and going to look at your subscription. */
+    const spread = await page.evaluate(async () => {
+      const hint = () => document.getElementById('preview-hint').textContent;
+      const realPlay = window.Player.play;
+      window.Player.play = function () {};
+      const out = [];
+      const chans = window.Channels.channels();
+      for (let i = 0; i < 3; i++) {
+        window.Channels.tuneTo(chans[i].key);
+        window.Channels.onPlayerEvent('error', 'Cannot reach the stream server');
+        out.push(hint());
+      }
+      /* And one that plays clears it: a channel starting is proof the
+         provider is answering after all. */
+      window.Channels.onPlayerEvent('playing');
+      window.Channels.tuneTo(chans[3].key);
+      window.Channels.onPlayerEvent('error', 'Cannot reach the stream server');
+      out.push(hint());
+      window.Player.play = realPlay;
+      return out;
+    });
+
+    ok(/Cannot reach/.test(spread[0]),
+       'one channel failing names the reason it gave', JSON.stringify(spread[0]));
+    ok(!/provider/.test(spread[0]) && !/provider/.test(spread[1]),
+       'and two is not yet a pattern', JSON.stringify(spread.slice(0, 2)));
+    ok(/provider/.test(spread[2]),
+       'but a third different channel says it is the provider',
+       JSON.stringify(spread[2]));
+    ok(!/provider/.test(spread[3]),
+       'and anything playing clears that, because the provider answered',
+       JSON.stringify(spread[3]));
+
+    /* ---------------------------------------------------------- */
+    describe('a channel that used up its retries can still be recovered');
+
+    /* A stream that fails three times has spent its automatic retries, and
+       that is deliberate — a fourth is not going to work either. What was
+       not deliberate: the count stayed spent. Pressing "back to live", or
+       choosing the same channel again, printed "unavailable" on the very
+       next failure without retrying, while switching to another channel and
+       back worked — because the switch reset the count on its way past.
+
+       Player.play is stubbed out here: this is about the bookkeeping, and a
+       real .ts in a browser raises errors of its own on its own schedule. */
+    const retryHints = await page.evaluate(async () => {
+      const hint = () => document.getElementById('preview-hint').textContent;
+      const nap = ms => new Promise(r => setTimeout(r, ms));
+      const realPlay = window.Player.play;
+      window.Player.play = function () {};
+      window.Store.set('settings.autoReconnect', true);
+      const key = window.Channels.channels()[0].key;
+      window.Channels.tuneTo(key);
+
+      const out = [];
+      /* Three is the budget, and each retry is armed on a timer. */
+      for (let i = 0; i < 3; i++) {
+        window.Channels.onPlayerEvent('error', 'boom');
+        out.push(hint());
+        await nap(3300);
+      }
+      window.Channels.onPlayerEvent('error', 'boom');   // spent
+      out.push(hint());
+
+      /* Somebody asks for it again. That is a new attempt, not a fourth. */
+      window.Channels.tuneTo(key);
+      window.Channels.onPlayerEvent('error', 'boom');
+      out.push(hint());
+
+      window.Player.play = realPlay;
+      window.Store.set('settings.autoReconnect', false);
+      return out;
+    });
+
+    ok(/Reconnect/i.test(retryHints[0]), 'the first failure retries',
+       JSON.stringify(retryHints[0]));
+    ok(/Reconnect/i.test(retryHints[2]), 'and so does the third',
+       JSON.stringify(retryHints[2]));
+    ok(!/Reconnect/i.test(retryHints[3]),
+       'the fourth gives up, which is the point of a budget',
+       JSON.stringify(retryHints[3]));
+    ok(/Reconnect/i.test(retryHints[4]),
+       'but asking for the channel again starts the budget over',
+       'was ' + JSON.stringify(retryHints[4]) +
+       ' — a spent count used to make every later attempt fail at once');
+
+    /* ---------------------------------------------------------- */
+    describe('TV mode — nothing opaque over the picture');
+
+    /* On a television the decoder draws behind the page: AVPlay's plane on
+       Tizen, ExoPlayer's surface under the WebView on Android. An opaque
+       page therefore hides the picture completely — sound, and a black
+       rectangle where the video should be — and that is exactly what
+       shipped. These tests could not see it, because the browser they run
+       in puts its video *inside* the page, where a backdrop behind it is
+       harmless. So boot the app as a television and check that nothing
+       between the viewer and the surface is painted in. */
+    const tvCtx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    await tvCtx.addInitScript(() => {
+      /* Just enough of the shell's bridge for U.isAndroid to be true. */
+      window.AquaPlayNative = {
+        shellVersion: () => 'test',
+        state: () => 'idle',
+        isPlaying: () => false,
+        videoSize: () => '',
+        surfaceRect: () => '',
+        positionMs: () => 0,
+        durationMs: () => 0,
+        setRect: () => {}, setBuffer: () => {},
+        play: () => {}, stop: () => {}, seekTo: () => {}
+      };
+    });
+    const tv = await tvCtx.newPage();
+    await tv.goto('http://127.0.0.1:' + port + '/', { waitUntil: 'load' });
+    await tv.waitForFunction(() => !!window.App && !!window.U, null, { timeout: 10000 });
+
+    /* Transparent, however the browser chooses to spell it. */
+    const clear = c => c === 'transparent' || /^rgba\(0, 0, 0, 0\)$/.test(c);
+    const paint = await tv.evaluate(() => ({
+      cls:   document.documentElement.className,
+      html:  getComputedStyle(document.documentElement).backgroundColor,
+      body:  getComputedStyle(document.body).backgroundColor,
+      stage: getComputedStyle(document.getElementById('stage')).backgroundColor,
+      layer: getComputedStyle(document.getElementById('video-layer')).backgroundColor
+    }));
+    ok(paint.cls.indexOf('tv') > -1, 'a TV build marks the page as one', paint.cls);
+    ok(clear(paint.html),  'the document paints no backdrop over the decoder', paint.html);
+    ok(clear(paint.body),  'nor does the body', paint.body);
+    ok(clear(paint.stage), 'nor the stage', paint.stage);
+    ok(clear(paint.layer), 'nor the video layer', paint.layer);
+
+    /* The light theme repaints the body, and must not undo this. */
+    const lightPaint = await tv.evaluate(() => {
+      window.Store.set('settings.theme', 'light');
+      window.U.applyTheme();
+      return {
+        html: getComputedStyle(document.documentElement).backgroundColor,
+        body: getComputedStyle(document.body).backgroundColor
+      };
+    });
+    ok(clear(lightPaint.body), 'the light theme does not paint it back in', lightPaint.body);
+    ok(clear(lightPaint.html), 'nor on the document', lightPaint.html);
+    await tvCtx.close();
 
     /* ---------------------------------------------------------- */
     describe('console health');

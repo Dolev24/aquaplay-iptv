@@ -84,6 +84,143 @@ this project started in, which had no shell at all.
   and read `frame_mbs_only_flag`. Advertised `CODECS=` in the manifest does
   not tell you — every channel there claims plain `avc1`.
 
+- **On Android the page must be transparent, or there is no picture at all.**
+  The decoder there draws on a SurfaceView behind the *whole* WebView, so
+  `html,body{ background:#000 }` covered every channel: sound, and a black
+  rectangle. Tizen hid it for years — AVPlay's `<object>` punches its own
+  hole through the page, so nothing painted behind it was ever consulted —
+  and so did the tests, because a browser puts its video *inside* the page
+  where a backdrop behind it is harmless. `html.tv, html.tv body{
+  background:transparent }` in `style.css`; the e2e suite now boots the app
+  with the Android bridge stubbed and checks nothing opaque sits over the
+  surface, in both themes (the light theme repainted the body too).
+
+  Do not trust `adb exec-out screencap` here: a video layer composited by
+  the hardware composer (`composition type=DEVICE` in `dumpsys
+  SurfaceFlinger`) comes back black whether or not it is on the screen, and
+  disabling overlays with `service call SurfaceFlinger 1008` no longer works
+  on current images. `adb emu screenrecord screenshot <dir>` goes through the
+  emulator's own compositor, and grabbing the emulator window on the host is
+  better still — that is what a person actually sees.
+
+- **Broadcast H.264 often has no IDR frames, and ExoPlayer waits for one for
+  ever.** Five of the first eight channels on the user's provider played
+  audio and showed nothing, with no error: the video track was found,
+  selected and reported *supported* (`trackInfo()` on the bridge says so),
+  and no video decoder was ever created — only the AAC one appeared in
+  logcat. That last detail is the tell. A decoder that refuses a stream is
+  a decoder that was asked; here nothing asked.
+
+  The fix is `DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES`,
+  which starts at the first recovery point instead. HLS needs its own
+  `HlsMediaSource.Factory` to carry it, since `DefaultMediaSourceFactory`
+  offers no way to pass extractor flags down the HLS path. Eight of eight
+  channels play with it; three of eight did without.
+
+  This was first diagnosed as a software decoder refusing interlaced video
+  and shipped as a message saying so. The streams *are* field-coded — the
+  SPS above confirms it — which made the wrong answer fit every fact that
+  had been gathered, and none of the ones that had not. Correlation across
+  channels (25fps failed, 50fps played) is not a mechanism.
+
+- **Reading a layout property back is what made the list lag.** Holding the
+  down key was janky, and the cause was not the eighteen rows being
+  repainted: `slideGuide` read `host.offsetHeight` on every cursor move to
+  force the guide panel's `transition:none` to commit before the next write
+  could be coalesced with it. That read forces a synchronous layout of the
+  whole page. The sampling profiler put `ensureGuideVisible` at **45% of a
+  held key's time**; the fix is to switch the transition only when it
+  actually changes, since between two non-animated moves there is nothing to
+  suppress. `ensureGuideVisible` also read `clientHeight` back for a number
+  that only changes with the window — that now comes from `measure()`.
+
+  Measured on the emulator over forty presses: **14.0ms of JS per keypress
+  to 1.3ms**, p90 18.7 to 1.8. The row rebuild was worth having too (the
+  list stops throwing away and re-parsing eight elements per row per press)
+  but it was the smaller half — 14.0 to 8.0 on its own.
+
+  Two metrics that looked authoritative and measured nothing: `requestAnimation
+Frame` intervals (they track vsync, and read a flat 16.7ms on a build that was
+  visibly janking) and `dumpsys gfxinfo` janky-frame percentage (58% before,
+  57% after — on an emulator it is dominated by the host's own compositing).
+  `Profiler.start` over CDP, summed by self time, found it in one run.
+
+- **Nothing cached the logos.** Every image in a playlist goes through
+  `NetBridge.shouldInterceptRequest`, and a body handed back from there never
+  reaches the WebView's own HTTP cache — so each logo was fetched from the
+  provider again every time its row scrolled back into view, measured at
+  **576ms apiece**. That is why a fast scroll left a column of blanks that
+  filled in seconds later. `NetBridge` now keeps images under 512 KB in an
+  access-ordered memory map (24 MB) and in `cacheDir/img`, one file each with
+  its mime type on the first line. After a relaunch: 39 hits, 0 misses, no
+  network at all.
+
+  Do not count the files with `run-as ... ls | wc -l` — it reported 6 for a
+  directory holding 39, which sent a good half hour after a bug that was not
+  there. `ls | grep -c .` is honest.
+
+- **Scrolling one row rewrote eighteen.** `VList` handed `pool[i]` to the
+  i-th *visible* row, so moving down by one shifted every node's index by one
+  and rewrote the lot — and rewriting a row means measuring and shaping its
+  text again, in Hebrew, Cyrillic and Latin. Binding a node to its row
+  instead (`pool[idx % n]`) covers the same window with the same nodes, but
+  scrolling by one rebinds one node and moves the rest, which is a transform
+  the compositor does by itself.
+
+  This is the one the JS profiler could not see: it is layout, not script.
+  `Performance.getMetrics` over a 60-press scroll, before and after:
+  LayoutDuration **579ms to 252ms**, RecalcStyle 226 to 98, and total
+  main-thread TaskDuration **1629ms to 1091ms**. Script was 230ms of it all
+  along. The e2e suite now counts how many rows change text when the list
+  moves by one: at most one, and it reports 18 of 18 if the binding goes back.
+
+- **Warming the logos belongs off the keypress.** Asking for a logo slightly
+  before its row appears is what stops a fast scroll showing gaps — a preload
+  costs one request and the row's own use then costs none. But doing it
+  inside the repaint meant arriving somewhere new created up to a hundred
+  `Image`s in one press: **6.8ms a press on a first pass against 1.5ms on a
+  second**, which is precisely what "sometimes laggy, sometimes not" is. A
+  queue drained three every 30ms outruns a held key four times over and
+  closed the gap to 2.3 against 1.7.
+
+- **`Date.now()` costs 29 microseconds in the Android TV emulator** — perhaps
+  five hundred times what it costs anywhere else. `EPG.nowNext` is asked by
+  every visible row on every keypress, so it now keeps its answer until the
+  programme on air ends. Worth knowing before optimising anything else that
+  reads the clock in a loop: the clock *was* the loop.
+
+  Measured end to end across the session, per keypress on the emulator:
+  **14.0ms mean / 18.7 p90, down to 1.7ms / 2.5**, and a cold region 2.3
+  rather than 6.8. What is left on that machine is its software rasteriser
+  — `dumpsys gfxinfo` puts the GPU at 12ms of a 17ms frame, which no amount
+  of work in the page can move.
+
+- **A spent retry budget stayed spent.** `MAX_RECONNECT` is three, and after
+  three failures the app stops retrying and says the channel is unavailable —
+  deliberate, since a fourth attempt at a dead stream helps nobody. What was
+  not deliberate is that the count only went back to zero when the channel
+  *changed*: `play()` read `if (playingKey !== c.key) cancelReconnect()`. So a
+  channel that had used up its three retries could never be recovered in
+  place. "Back to live", or choosing it again, printed "unavailable" on the
+  very next failure with no retry left — while switching to another channel
+  and back worked, because the switch reset the count on its way past. That
+  is exactly how it was reported: *"reconnect doesn't fix it, but switching
+  channels and coming back does."*
+
+  The rule the code was missing: **a retry the app decided on keeps counting;
+  an attempt a person asked for starts the budget over.** `reconnectNow()` is
+  now the only caller passing `autoRetry`. The e2e suite drives the
+  bookkeeping directly with `Player.play` stubbed — four failures, then a
+  `tuneTo` of the same channel, and the fifth must say "Reconnecting" again.
+
+  Worth noting how much of the search was wasted on the plausible-sounding
+  answer: a half-open connection to a provider that allows one at a time. It
+  was tested — stream frozen by throttling the emulator to GSM speeds for
+  forty seconds, network restored, same URL reopened — and it recovered in
+  one second every time. The bug was in the app's own counter all along, and
+  reading the four lines around `cancelReconnect` would have found it faster
+  than any of it.
+
 - **Never forward an upstream `content-length` through the dev proxy once the
   body has been decompressed.** It describes the compressed bytes, so the
   browser stops reading there. A real provider XMLTV (30 MB `.gz` -> 242 MB)
@@ -1472,14 +1609,40 @@ Samsung asks for four things and they are different shapes:
 
 | file | size | depth | what it is |
 | --- | --- | --- | --- |
-| `app/icon.png` | 512x423 | 24-bit | the application icon, the one in the .wgt |
+| `app/icon.png` | 512x512 | 24-bit | the application icon, the one in the .wgt |
 | `branding/testing-icon-117x117.png` | 117x117 | 24-bit | the small icon while an app is side-loaded |
 | `branding/banner-background-1920x1080.png` | 1920x1080 | 24-bit | large logo, the part underneath |
 | `branding/banner-logo-1920x1080.png` | 1920x1080 | 32-bit | large logo, the wordmark over it |
 
-Each under 300 KB. The first one is the one that was wrong: a TV tile is wider
-than it is tall, and this shipped a 512x512 icon until the guidelines were read
-properly, so the launcher was letterboxing the artwork into its own tile.
+Each under 300 KB. **The first one is settled: 512x512, square, and the shape
+is not a knob.** Leave it alone.
+
+It has been 512x512, 512x423, 1920x1080 and back, on a run of confident
+readings that each turned out to be about somebody else’s television. Then a
+pair of icons declared with `width` and `height` attributes, which is what
+TizenTube ships and what does get a wide tile *somewhere*:
+
+```xml
+<icon src="icon_16b9.png" width="1920" height="1080"/>
+<icon src="icon.png" width="1024" height="1024"/>
+```
+
+That was tried, and the tile on the set this is built for did not change.
+
+So the honest state of it: **nothing in the package has ever changed that
+tile**, in four attempts, and it costs 380 KB to keep trying. Every theory
+here has been a theory — Samsung’s icon spec, a measurement off a photograph,
+a working package copied attribute for attribute — and the only thing with a
+result attached is that none of them moved it. If it matters enough to try a
+fifth time, the thing to change is the evidence, not the number: get a set
+that shows the wide tile for a side-loaded app and diff its package against
+this one.
+
+What the measurement off a photograph was good for, for whoever picks this
+up: two tiles side by side, 743 and 724 pixels tall — one row, agreeing to
+97%, which is what says the reading is sound — and 1214 and 645 wide. The
+neighbour is 16:9 and this app is square. That much is fact; the cause is
+not established.
 
 `npm run icons` builds all four from `tools/icon-source.jpg`, which is the
 artwork at full size and the only thing any of them come from — keep it.

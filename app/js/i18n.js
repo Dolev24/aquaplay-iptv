@@ -42,12 +42,25 @@
      translating at paint time, and it is cheaper than the alternative, which
      is freezing every label at load time. */
   I.EXTRA = [
+    /* Everything the player says when playback fails. These reach T() through
+       a variable rather than as a literal: the message travels up from AVPlay
+       and from the Android shell in English, because that English is also the
+       identity of the fault — isDecodeError reads it — and it is looked up on
+       its way to the screen. */
+    'Cannot reach the stream server', 'Format not supported by this TV',
+    'Format not supported by this device', 'Invalid stream URL',
+    'Stream not found (channel may be offline)', 'Network error', 'Seek failed',
+    'Could not open this stream', 'Player error',
+    'This device cannot decode this channel\'s video',
+    'This channel is sending sound but no picture',
+    'This browser cannot decode interlaced video — the TV can',
+
     /* dayLabel(), and the catch-up browser's own list */
     'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 
     /* the built-in groups and the search placeholders, by section */
-    'All', 'All channels', 'All movies', 'All series', 'Favourites', 'Recently watched',
+    'All', 'All channels', 'All movies', 'All series', 'Favorites', 'Recently watched',
     'Search', 'Search channels', 'Search movies', 'Search series',
 
     /* what a settings row cycles through */
@@ -63,9 +76,9 @@
     'Theme', 'Start on', 'Which list the app opens with',
     'Arrows change channel', 'Up and down while watching fullscreen',
     'Sort channels', 'Provider order, or by channel number',
-    'Alternating row colours', 'Shade every other channel in the list',
-    'Programme guide', 'Download and show now/next',
-    'Catch-up history', 'How far back the guide lists finished programmes',
+    'Alternating row colors', 'Shade every other channel in the list',
+    'Program guide', 'Download and show now/next',
+    'Catch-up history', 'How far back the guide lists finished programs',
     'Picture size', 'How the video fills the screen',
     'Clock', 'Resume last channel', 'Start the last channel in the panel on launch',
     'Info bar duration',
@@ -84,7 +97,7 @@
     'Reload the playlist', 'Schedule', 'I — and Enter there sets a reminder',
     'Channel menu', 'Right from the list', 'Catch-up browser', 'Menu',
     'Left from the groups rail', 'Rewind / forward', 'Left / Right in fullscreen',
-    'Jump 5 minutes', 'J / L', 'Replay a programme',
+    'Jump 5 minutes', 'J / L', 'Replay a program',
     'Enter on one marked in the guide', 'Jump to a channel', '0 - 9', 'This list',
 
     /* said through a constant, because two places say the same thing */

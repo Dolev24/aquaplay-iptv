@@ -109,12 +109,50 @@
     paint(); msg('');
   }
 
+  /* On Android the shell has to be told, or the WebView opens the keyboard
+     by itself and then leaves it up — owning the D-pad, so the next OK goes to
+     the keyboard instead of to the button the cursor is on. */
+  function tellShell(on) {
+    if (!U.isAndroid) return;
+    try { w.AquaPlayNative.setEditing(!!on); } catch (e) {}
+  }
+
+  /* And the shell tells us back. While a television's keyboard is up it has
+     every key — the D-pad included — so the page cannot see the press that
+     dismisses it and would stay in its editing state for ever, sending every
+     later press to a keyboard that has gone. */
+  w.AquaPlayShell = w.AquaPlayShell || {};
+  w.AquaPlayShell.imeClosed = function () {
+    if (!editing) return;
+    editing = false;
+    var el = items[focusIdx];
+    if (el && el.blur) el.blur();
+    paint();
+  };
+
+  /* Whatever the page is focused on, whether or not it is the field this
+     module thinks it is. The keyboard follows the browser's idea of focus,
+     not ours, so that is the one to clear. */
+  function dropFocus(except) {
+    var el = document.activeElement;
+    if (el && el !== except && el.blur && el.tagName === 'INPUT') {
+      try { el.blur(); } catch (e) {}
+    }
+  }
+
   function startEdit() {
     var el = items[focusIdx];
     if (!el || el.tagName !== 'INPUT') return false;
+    /* Anything else editable lets go first. Focusing one field while the
+       keyboard is already open on another does not always move the keyboard,
+       and then the cursor is on one box and the typing is in another. */
+    dropFocus(el);
     editing = true;
     el.focus();
     try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
+    /* And the shell is asked for a keyboard only once that focus has landed —
+       asking in the same turn opens it against whatever was focused before. */
+    U.nextTick(function () { if (editing && items[focusIdx] === el) tellShell(true); });
     return true;
   }
 
@@ -122,6 +160,8 @@
     editing = false;
     var el = items[focusIdx];
     if (el && el.blur) el.blur();
+    dropFocus(null);
+    tellShell(false);
   }
 
   S.key = function (e) {
@@ -154,6 +194,9 @@
   };
 
   function move(d) {
+    /* Leaving a field behind with the browser still focused on it is what
+       sends the next keystroke — or the next keyboard — to the wrong box. */
+    dropFocus(null);
     // Items 0 and 1 are the two tabs — one logical row. Moving down off that
     // row must clear it entirely, or the "keep the current tab highlighted"
     // rule below would snap 0 -> 1 -> 0 and trap focus on the tabs.
@@ -170,6 +213,9 @@
   function activate() {
     var el = items[focusIdx];
     if (!el) return;
+    /* Connect used to open a keyboard, because a field still had focus and
+       the shell was told to show one for it. */
+    if (el.tagName !== 'INPUT') { dropFocus(null); tellShell(false); }
     if (el.classList.contains('tab')) { setTab(el.getAttribute('data-tab')); return; }
     if (el.tagName === 'INPUT') { startEdit(); return; }
     if (el.id === 'setup-connect') { connect(); return; }
@@ -177,6 +223,14 @@
   }
 
   function val(id) { return U.$(id).value.trim(); }
+
+  /* The id of the entry this one would replace, if any — so a playlist saved
+     again under its own name is not treated as a clash with itself. */
+  function sameSourceId(p) {
+    var hit = null;
+    Store.profiles().forEach(function (x) { if (!hit && Store.sameSource(x, p)) hit = x; });
+    return hit ? hit.id : null;
+  }
 
   function connect() {
     msg('');
@@ -193,6 +247,13 @@
       if (!/^https?:\/\//i.test(url)) { msg('URL must start with http:// or https://'); return; }
       p = { type: 'm3u', name: val('m-name') || 'My playlist', url: url, epgUrl: val('m-epg') };
     }
+
+    /* A name is how the switcher tells one from another, so two the same makes
+       the list useless. Checked against everything except the entry this one
+       is about to replace — re-saving a playlist under its own name is not a
+       clash. */
+    var clash = Store.profileNamed(p.name, sameSourceId(p));
+    if (clash) { msg(T('There is already a playlist called {name}', { name: p.name })); return; }
 
     busy = true;
     U.loader(true, T('Connecting…'));
@@ -216,7 +277,7 @@
       U.loader(false);
       var preload = p._preload;      // never persist the raw playlist text
       delete p._preload;
-      var saved = Store.addProfile(p);
+      var saved = Store.saveProfile(p);
       msg(T('Connected'), true);
       App.onProfileReady(saved, preload);
     }).catch(function (err) {

@@ -421,13 +421,16 @@
     return id;
   };
 
-  /* nowNext(channel, at) -> {now, next} | null */
-  E.nowNext = function (ch, at) {
-    var id = E.resolve(ch);
-    if (!id) return null;
-    var arr = E.data.byChannel[id];
-    if (!arr || !arr.length) return null;
-    var t = at || Date.now();
+  /* What is on each channel, remembered until it stops being true.
+
+     Every visible row asks this on every keypress, and it walks the channel's
+     programmes from the start each time — the largest thing left in the
+     profile of a held key. The answer is good until the programme on air
+     ends, which is a fact the answer itself carries, so keep it that long.
+     Keyed by guide id and thrown away wholesale when the guide is rebuilt. */
+  var nnCache = {}, nnGen = -1;
+
+  function nowNextAt(arr, t) {
     var nowP = null, nextP = null;
     for (var i = 0; i < arr.length; i++) {
       var p = arr[i];
@@ -436,6 +439,31 @@
     }
     if (!nowP && !nextP) return null;
     return { now: nowP, next: nextP };
+  }
+
+  /* nowNext(channel, at) -> {now, next} | null */
+  E.nowNext = function (ch, at) {
+    var id = E.resolve(ch);
+    if (!id) return null;
+    var arr = E.data.byChannel[id];
+    if (!arr || !arr.length) return null;
+    /* An explicit moment is somebody asking about a particular time, which is
+       not the live question and is not what the cache answers. */
+    if (at) return nowNextAt(arr, at);
+
+    var t = Date.now();
+    var gen = E.data.gen || 0;
+    if (gen !== nnGen) { nnCache = {}; nnGen = gen; }
+    var hit = nnCache[id];
+    if (hit && t < hit.until) return hit.res;
+
+    var res = nowNextAt(arr, t);
+    /* Good until what is on ends, or until the next one starts if nothing is
+       on now. With neither, re-ask in a minute rather than never. */
+    var until = res && res.now ? res.now.e
+              : (res && res.next ? res.next.s : t + 60000);
+    nnCache[id] = { until: until, res: res };
+    return res;
   };
 
   /* Every programme held for a channel, in time order. Bounded by the parse
@@ -526,6 +554,26 @@
   };
 
   /* Compact form for the IndexedDB cache (drops nothing we need). */
+  /* How far ahead the guide still reaches: the latest programme end it
+     holds, across every channel. Worked out once and remembered, because the
+     answer only changes when the guide does. */
+  var coversTo = -1, coversGen = -1;
+  E.coversUntil = function () {
+    var gen = E.data.gen || 0;
+    if (coversGen === gen && coversTo >= 0) return coversTo;
+    var latest = 0;
+    var byCh = E.data.byChannel || {};
+    for (var id in byCh) {
+      if (!Object.prototype.hasOwnProperty.call(byCh, id)) continue;
+      var arr = byCh[id];
+      if (!arr || !arr.length) continue;
+      var end = arr[arr.length - 1].e;
+      if (end > latest) latest = end;
+    }
+    coversGen = gen; coversTo = latest;
+    return latest;
+  };
+
   E.serialise = function () {
     return { b: E.data.byChannel, n: E.data.nameIndex, c: E.data.count, t: E.data.builtAt };
   };

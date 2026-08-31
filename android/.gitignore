@@ -4,3 +4,7 @@ local.properties
 *.iml
 .idea/
 .cxx/
+# The signing key lives outside the repository; this only points at it.
+keystore.properties
+*.jks
+*.keystore

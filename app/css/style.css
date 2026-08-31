@@ -103,19 +103,44 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
    cover the picture still do and the ones that should not, do not. */
 .tv #stage{ background:transparent; }
 .tv #video-layer{ background:transparent; z-index:0; }
-.tv #view-setup, .tv #view-settings{ background:var(--bg); }
+.tv #view-setup{ background:var(--bg); }
+
+/* ...including the page itself, which this rule set forgot for years.
+   `html,body` above are an opaque black, and on Android the decoder draws on
+   a surface behind the *whole* WebView — so that black covered the picture
+   completely and the app played sound over a black rectangle. Tizen hid the
+   mistake: there the <object> punches its own hole through the page, so
+   nothing behind it was ever consulted. The panes each paint their own
+   background (#groups, #channels, the overlays), so taking the backdrop away
+   costs nothing anywhere else — where no pane paints, the picture belongs. */
+html.tv, html.tv body{ background:transparent; }
 
 /* ============================ SETUP ============================ */
-.setup-wrap{ position:absolute; left:200px; top:130px; width:820px; }
-.brand{ font-size:26px; letter-spacing:.18em; text-transform:uppercase; color:var(--text-dim); margin-bottom:44px; }
-.brand-mark{
-  display:inline-block; width:14px; height:14px; border-radius:4px;
-  background:var(--accent); margin-right:14px; vertical-align:middle;
+/* Centred, like Settings. The fields inside it are not: centred labels over
+   centred inputs give the eye no left edge to come back to, and a form is
+   read down one. */
+/* Half as big again as the one on Settings. This is the first screen a new
+   viewer ever sees and there is nothing else on it competing for the top of
+   the page, so it can afford to be the app introducing itself. */
+/* The mark ended at 160 and the heading began at 152, so the two were
+   overlapping — which is what "almost touching" was. It sits higher now and
+   the page starts lower, leaving a clear gap between them. */
+/* 354x118 is the shape of the artwork itself — 900x300, 3:1 — so the box
+   holds the mark exactly and nothing can slide inside it. It was 430 wide
+   for a mark that drew 354, and the spare 76px went to one side. */
+.setup-brand{
+  position:absolute; left:50%; margin-left:-177px; top:34px;
+  width:354px; height:118px; background-position:center center;
 }
-.setup-wrap h1{ font-size:52px; font-weight:600; letter-spacing:-.01em; }
-.setup-sub{ font-size:24px; color:var(--text-dim); margin-top:14px; }
+.setup-wrap{ position:absolute; left:550px; top:206px; width:820px; }
+.setup-wrap h1{
+  font-size:52px; font-weight:600; letter-spacing:-.01em; text-align:center;
+}
+.setup-sub{
+  font-size:24px; color:var(--text-dim); margin-top:14px; text-align:center;
+}
 
-.tabs{ margin:44px 0 12px; font-size:0; }
+.tabs{ margin:40px 0 12px; font-size:0; text-align:center; }
 .tab{
   display:inline-block; font-size:24px; padding:16px 34px; margin-right:14px;
   border-radius:12px; background:var(--bg-3); color:var(--text-dim);
@@ -136,7 +161,7 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 }
 .field input.focused{ border-color:var(--accent); background:var(--bg-3); }
 
-.setup-actions{ margin-top:38px; font-size:0; }
+.setup-actions{ margin-top:38px; font-size:0; text-align:center; }
 .btn{
   display:inline-block; font-family:inherit; font-size:25px; font-weight:500;
   padding:20px 52px; margin-right:16px; border-radius:12px; cursor:pointer;
@@ -197,7 +222,7 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 
    So there is nothing to fall behind. One paint. */
 #groups{ overflow:hidden; }
-#stage.rail-in #groups{ width:26px; }
+#stage.rail-in #groups{ width:26px; border-left:0; }
 #stage.rail-in #channels{ left:26px; }
 /* Folded, the rail shows nothing but the handle: a sliver of half-clipped
    group names reads as a rendering fault rather than as a drawer. Hidden
@@ -209,8 +234,16 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
   width:0; height:0; border-left:10px solid var(--text-dim);
   border-top:10px solid transparent; border-bottom:10px solid transparent;
 }
+/* The left 26px are the drawer folded under the rail, the same width the
+   rail itself folds to. A border rather than padding or a margin on every
+   row: the padding box an absolutely positioned child is laid out against
+   includes the padding, so padding moves the head, which is in flow, and
+   leaves the scroller, the sections and the foot exactly where they were.
+   A border does inset it, so one declaration moves all four. Folded, the
+   rail is 26px of nothing and gives it back. */
 #groups{
   position:absolute; left:0; top:0; width:280px; height:1080px;
+  border-left:26px solid var(--bg-2);
   background:var(--bg-2); border-right:1px solid var(--line);
 }
 #group-scroller{ position:absolute; top:96px; bottom:128px; left:0; right:0; overflow:hidden; }
@@ -397,16 +430,27 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .ch-row.focused .ch-now{ color:rgba(255,255,255,.9); }
+/* The start time is a different kind of fact from the programme's name, and
+   two spaces between them was not enough to say so at this size: it read as
+   one long label with a number in front of it. Dimmer, spaced, and lining —
+   tabular figures so the titles start at the same place down the column. */
+.ch-at{
+  font-style:normal; color:var(--text-dim2); margin-right:14px;
+  font-variant-numeric:tabular-nums;
+}
+.ch-row.focused .ch-at{ color:rgba(255,255,255,.62); }
 
 .ch-right{ flex:0 0 auto; margin-left:14px; width:62px; text-align:center; }
-/* Drawn with two rounded boxes, so no font has to own a heart glyph. */
+/* A star, cut out of a box rather than typed: no font on a television is
+   guaranteed to own the glyph, which is the same reason the padlock and the
+   arrows below are shapes. clip-path lands in Chromium 55, one before the 56
+   this has to run on. Gold, because a favourite is a favourite everywhere. */
 .ch-fav{ position:relative; display:block; width:22px; height:20px; margin:0 auto 5px; }
-.ch-fav.on:before, .ch-fav.on:after{
-  content:""; position:absolute; top:0; width:11px; height:17px;
-  background:var(--heart); border-radius:11px 11px 0 0;
+.ch-fav.on{
+  background:var(--fav);
+  clip-path:polygon(50% 2%, 61% 36%, 97% 36%, 68% 57%, 79% 92%, 50% 71%,
+                    21% 92%, 32% 57%, 3% 36%, 39% 36%);
 }
-.ch-fav.on:before{ left:11px; transform:rotate(-45deg); transform-origin:0 100%; }
-.ch-fav.on:after{ left:0; transform:rotate(45deg); transform-origin:100% 100%; }
 /* A padlock out of a box and half a ring, for the same reason as the heart:
    no font on the TV is guaranteed to own the glyph. Only ever drawn while the
    session is unlocked — otherwise the channel is not in the list at all. */
@@ -442,8 +486,43 @@ html.light .seek-line{ background:rgba(255,255,255,.18); }
 /* Six buttons in a 600px bar while the rail is open, so they are tight on
    purpose; the bar clips rather than wraps, and the rail is folded most of
    the time anyway, which gives it another 254px. */
-.act{ display:inline-block; font-size:15px; color:var(--text-dim); margin-right:9px; }
+/* What the row of colours is, for anybody who has not worked it out. Dimmer
+   than the entries themselves: it is a heading, not one of them.
+
+   It used to hide itself while the rail was out — with six entries the bar
+   wanted 637px of the 600 it has there. Enter is no longer one of them and
+   the five that are left fit with it: 600 in 600, measured. */
+.act-label{
+  display:inline-block; font-size:15px; color:var(--text-dim2);
+  margin-right:12px; letter-spacing:.02em;
+}
+.act{ display:inline-block; font-size:15px; color:var(--text-dim); margin-right:13px; }
 .act .k{ margin-right:7px; }
+/* Bare arrows, for the two entries that are a direction rather than a key
+   to press. Drawn from borders, like the pair in the fullscreen legend. */
+.k-left, .k-right{
+  width:auto; height:auto; border-radius:0; background:transparent;
+  padding:0; vertical-align:middle;
+  /* The bar sets line-height:64px so its text sits in the middle of it. An
+     inline-block that contains nothing but a border triangle inherits that
+     and puts the triangle on the baseline of a 64px line, which is the floor
+     of the bar. Zero here, and the box is the arrow. */
+  line-height:0; font-size:0;
+}
+.k-left:after, .k-right:after{
+  content:""; display:inline-block; vertical-align:middle;
+  width:0; height:0;
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+}
+.k-left:after{ border-right:9px solid var(--text-dim); }
+.k-right:after{ border-left:9px solid var(--text-dim); }
+
+/* The two arrows are about what left and right do from the channel list.
+   With the rail out the bar has 600px rather than 854, which is not enough
+   for seven entries at a size worth reading — and the cursor is in the rail
+   then, where those two keys do something else anyway. So they are the ones
+   that go. */
+#stage:not(.rail-in) .act-arrow{ display:none; }
 
 #keyhelp{
   position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:11;
@@ -542,8 +621,20 @@ html.light #number{ background:rgba(20,24,33,.5); }
   background:var(--bg-2); border-left:1px solid var(--line); border-top:1px solid var(--line);
 }
 .preview-meta{ position:absolute; top:0; left:0; right:0; height:122px; padding:22px 32px 0; }
-/* The channel being previewed, named once and read from across the room. */
+/* The channel being previewed, named once and read from across the room,
+   with its logo beside it and what is on it at the far end of the line. */
+.pm-head{ display:flex; align-items:center; height:44px; }
+/* Wider than it is tall, like the ones in the list: channel logos are almost
+   never square, and a square box either crops them or floats them in space. */
+.pm-logo{
+  flex:0 0 auto; width:64px; height:44px; margin-right:16px;
+  background-repeat:no-repeat; background-position:center center;
+  background-size:contain;
+}
+/* No logo, no gap — the name starts where the logo would have been. */
+.pm-logo.blank{ display:none; }
 .pm-name{
+  flex:0 1 auto; min-width:0;
   font-size:38px; font-weight:700; line-height:44px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
@@ -584,10 +675,14 @@ html.light #number{ background:rgba(20,24,33,.5); }
 }
 /* Five whole rows fill the box exactly, so nothing peeks over the edge to say
    there is more. This says it instead — and says where in the nine you are,
-   which a fade could not. It lives in the scroller's right-hand padding, clear
-   of the longest programme name. */
+   which a fade could not.
+
+   Down the left-hand padding. It was down the right, which is the same 26px
+   of screen the right-edge sign stands on, and that sign is drawn over it:
+   the marker was there and could not be seen. The left padding is as clear
+   of the longest programme name and has nothing else in it. */
 .epg-track{
-  position:absolute; right:7px; top:6px; bottom:6px; width:3px;
+  position:absolute; left:7px; top:6px; bottom:6px; width:3px;
   border-radius:2px; background:rgba(255,255,255,.10);
   opacity:0; transition:opacity .12s linear;
 }
@@ -616,7 +711,18 @@ html.light .epg-track{ background:rgba(0,0,0,.13); }
    hours ago. Everything still fits a 60px row — a 27px name is a 34px line,
    and the only row that also carries a progress bar is the one on air, at
    34 + 3 + 8. */
-.epg-time{ flex:0 0 80px; font-size:20px; line-height:26px; color:var(--text-dim); }
+/* The clock is the column somebody scans down rather than reads, so it is
+   the weight that carries it: bolder, a size up, and in the brighter of
+   the two greys. 20px of --text-dim went grey on grey from three metres.
+
+   96px, not 80: the column is sized for the widest thing it can hold, which
+   is the on-air row - 23px, bold - reading 12:38pm on a twelve-hour clock.
+   That is 87px, and it had been overflowing an 80px column and running into
+   the programme name long before this made the type any bigger. */
+.epg-time{
+  flex:0 0 96px; font-size:22px; line-height:26px;
+  font-weight:600; color:var(--text-mid);
+}
 .epg-body{ flex:1 1 auto; min-width:0; }
 .epg-name{
   display:block; font-size:22px; line-height:28px; color:var(--text-mid);
@@ -732,7 +838,16 @@ html.light #ctxmenu{ background:rgba(20,24,33,.3); }
   position:absolute; right:0; top:0; width:620px; height:1080px;
   background:var(--bg-2); border-left:1px solid var(--line); padding-top:44px;
 }
-.cm-head{ padding:0 36px 26px; }
+.cm-head{ padding:0 36px 26px; white-space:nowrap; }
+/* The channel this menu is about, in the same picture the list showed. */
+.cm-logo{
+  display:inline-block; vertical-align:middle; width:76px; height:52px;
+  margin-right:20px;
+  background-repeat:no-repeat; background-position:center center;
+  background-size:contain;
+}
+.cm-logo.blank{ display:none; }
+.cm-headings{ display:inline-block; vertical-align:middle; max-width:460px; }
 .cm-title{
   font-size:36px; font-weight:600; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -758,10 +873,9 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
    down the words without the pictures pushing them about. The icon is a glyph
    and the label is not: they are separate spans, so a set whose font has no
    emoji loses a picture rather than growing a box in the middle of a word. */
-.mi-ico{
-  display:inline-block; width:54px; font-size:27px; line-height:1;
-  vertical-align:middle; text-align:left;
-}
+/* A fixed column so the words line up down the menu whatever is beside
+   them. The mark itself is 30px of drawn line inside it. */
+.mi-ico{ width:30px; height:30px; margin-right:24px; }
 .mi-label{ vertical-align:middle; }
 .cm-row .mi-label, .sm-row .mi-label{
   display:inline-block; max-width:440px;
@@ -776,11 +890,29 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
 .k-red{ background:#e34b5c; } .k-green{ background:#3fb96b; }
 .k-yellow{ background:#e0b73c; } .k-blue{ background:#3f7fd1; }
 .k-ok, .k-back, .k-play, .k-info{
-  width:auto; border-radius:5px; padding:2px 8px; font-size:13px; line-height:17px;
+  /* height too: the base .k is a 16px dot, and a box with a word in it needs
+     to be as tall as the word. Left at 16 the text sat outside its own box. */
+  width:auto; height:auto; border-radius:5px; padding:2px 8px;
+  font-size:13px; line-height:17px;
   background:var(--bg-3); color:var(--text-dim); border:1px solid var(--line);
 }
 /* The remote's play button, drawn with borders. A glyph would be at the mercy
    of whatever font the TV falls back to - see the tofu in the guide. */
+/* The Enter key, drawn as the remote actually prints it: a box with a
+   return arrow in it. A ring with a dot is the middle of a newer D-pad and
+   reads as a record button on this one. Masked rather than typed, for the
+   same reason as every other icon here — a glyph is at the mercy of
+   whatever font the TV falls back to. The word stays in the markup: it is
+   what the element means, and what a test reads, and it is not painted. */
+.k-ok{
+  width:26px; height:26px; padding:0; font-size:0; vertical-align:middle;
+  border:0; border-radius:0; background-color:var(--text-dim);
+  -webkit-mask-repeat:no-repeat;   mask-repeat:no-repeat;
+  -webkit-mask-position:center;    mask-position:center;
+  -webkit-mask-size:contain;       mask-size:contain;
+  -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='5.5' width='19' height='13' rx='1.5'/%3E%3Cpath d='M16.5 9v4H9'/%3E%3Cpath d='M11 11 9 13l2 2'/%3E%3C/svg%3E");
+  mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='5.5' width='19' height='13' rx='1.5'/%3E%3Cpath d='M16.5 9v4H9'/%3E%3Cpath d='M11 11 9 13l2 2'/%3E%3C/svg%3E");
+}
 .k-play{ padding:2px 9px; }
 .k-play:before{
   content:""; display:inline-block; vertical-align:middle; margin-top:-2px;
@@ -838,7 +970,7 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
 
 /* ============================ OSD ============================ */
 #osd{
-  position:absolute; left:0; right:0; bottom:0; height:344px; padding:38px 70px; z-index:6;
+  position:absolute; left:0; right:0; bottom:0; height:392px; padding:38px 70px; z-index:6;
   /* Text over a picture is only as readable as what is behind it, and a live
      broadcast can be anything. Nearly solid at the bottom, fading out at the
      top so it still reads as an overlay rather than a black band. */
@@ -847,6 +979,66 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
   text-shadow:0 2px 6px rgba(0,0,0,.65);
 }
 .osd-row{ position:relative; height:268px; }   /* fits the six rows below, at the sizes they are */
+
+/* The key legend, along the foot of the panel. 48px of the panel's height
+   is for this — the panel grew rather than the text moving up, so nothing
+   above it had to be re-measured. */
+.osd-keys{
+  /* 38px up, the same as the panel own padding: the bottom 2-3% of a
+     television is where overscan lives, and a legend is no use inside it. */
+  position:absolute; left:70px; right:70px; bottom:38px;
+  height:32px; line-height:32px;
+  font-size:0; white-space:nowrap; overflow:hidden;
+}
+.osd-keys .act{ font-size:17px; margin-right:30px; }
+/* Not while the scrubber is up. Winding through a broadcast, the thing
+   being read is the time being landed on, and the legend is a second row
+   of small print under it on a screen that already has a picture on it.
+
+   A sibling selector rather than a line of JavaScript: the scrubber is
+   before this in #osd and toggles one class, so there is no second piece
+   of state to keep in step, and none to forget to clear. */
+#osd-seek:not(.hidden) ~ .osd-keys{ display:none; }
+/* And the other readout. A film or anything the player gives a duration
+   for seeks for real and says so in a toast rather than in the scrubber
+   above — a different element in a different corner, so the sibling rule
+   cannot see it and the view has to say. */
+#osd.seeking .osd-keys{ display:none; }
+
+/* There is no tab on the right of this panel any more, and no channel menu
+   behind it. Right is the key that winds the picture forward, and every
+   arrangement that gave one key that job and a menu as well was worse than
+   either of them alone. */
+.osd-keys .act:last-child{ margin-right:0; }
+.osd-keys .k-ok{ width:24px; height:24px; }
+
+/* A pair of arrows rather than one, because the entry is about two keys.
+   Triangles from borders, like every other drawn thing here. */
+.k-lr, .k-ud{
+  width:auto; height:auto; border-radius:0; background:transparent;
+  padding:0; vertical-align:middle;
+}
+.k-lr:before, .k-lr:after, .k-ud:before, .k-ud:after{
+  content:""; display:inline-block; width:0; height:0; vertical-align:middle;
+}
+.k-lr:before{
+  border-right:9px solid var(--text-dim);
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+  margin-right:8px;
+}
+.k-lr:after{
+  border-left:9px solid var(--text-dim);
+  border-top:6px solid transparent; border-bottom:6px solid transparent;
+}
+.k-ud:before{
+  border-bottom:9px solid var(--text-dim);
+  border-left:6px solid transparent; border-right:6px solid transparent;
+  margin-right:8px;
+}
+.k-ud:after{
+  border-top:9px solid var(--text-dim);
+  border-left:6px solid transparent; border-right:6px solid transparent;
+}
 /* Centred on the block of text rather than sitting on top of it, and as large
    as the column allows: 180px against the text's 196px margin leaves a 16px
    gap, so nothing else has to move. `contain` means a wide logo still lays out
@@ -869,11 +1061,18 @@ html.light .cm-row:after{ background:rgba(0,0,0,.10); }
    behind. Focus inverts it — a red button that goes slightly redder is not a
    state change anyone can see from across a room — and the ring is the same
    red, so the two states are one idea seen twice. */
+/* On the right of the line above the progress bar, beside how much of the
+   programme is left. It used to be a band of its own above the title,
+   which is a long way from the bar it is about.
+
+   Floated, and first in the markup, so it lands outermost and the
+   time-left sits inside it. Sized to the 24px line it now shares rather
+   than to the space it used to have to itself. */
 .osd-back{
-  display:inline-block; margin-left:22px; padding:6px 26px 8px;
+  float:right; margin-left:20px; padding:2px 18px 4px;
   border-radius:100px; border:2px solid var(--live); background:var(--live);
-  font-size:24px; font-weight:700; font-style:normal; letter-spacing:.05em;
-  color:#fff; vertical-align:middle;
+  font-size:19px; font-weight:700; font-style:normal; letter-spacing:.04em;
+  color:#fff;
 }
 .osd-back.focused{
   background:#fff; color:var(--live);
@@ -973,47 +1172,101 @@ html.light .osd-next-tag{ color:#fff; }
 /* The wordmark, drawn from the one PNG in the package that is not a launcher
    icon. background-size:contain and a fixed height, so every place that shows
    it picks a size and the aspect looks after itself. */
+/* One mark, two grounds. It is drawn light — white through pale blue — for a
+   dark screen, and on the light theme's pale grey it all but disappeared.
+   Darkened rather than inverted: inverting takes pale blue to dark orange and
+   the mark stops looking like itself. Brightness keeps the hue and the
+   gradient in it; the saturation stops what is left going flat grey. */
+html.light .brand-logo{ filter:brightness(.34) saturate(1.6); }
+/* Centred, not pinned left. This rule sits below every screen's own brand
+   rule and matches it for specificity, so whatever it says here is what
+   wins unless a rule is more specific than a single class. It said left,
+   and the setup screen's "center center" three hundred lines earlier lost
+   quietly: the box was centred and the picture inside it was not. */
 .brand-logo{
   display:inline-block; vertical-align:middle;
   background-image:url("../img/logo.png");
-  background-repeat:no-repeat; background-position:left center;
+  background-repeat:no-repeat; background-position:center center;
   background-size:contain;
 }
 /* The rail head. 200px against a 280px rail leaves it breathing room on both
    sides and still reads from across a room. */
-.brand-head{ padding-top:0; }
-.brand-head .brand-logo{ width:200px; height:64px; margin-top:16px; }
+/* No side padding of its own: the rail already keeps its content clear of the
+   drawer edge, and 30px more on each side left the 200px mark wider than the
+   193px it had to sit in - so auto margins gave up and it stopped being
+   centred on the rest of the rail. */
+.brand-head{ padding:0; }
+/* Centred in the 280px rail rather than pushed against its left edge. */
+.brand-head .brand-logo{
+  display:block; width:200px; height:64px; margin:16px auto 0;
+  background-position:center center;
+}
 
 /* ============================ SETTINGS ============================ */
-/* Top left, above the heading, at the same size the rail head shows it: the
-   two screens are one app and should say so in the same voice. */
+/* Over the heading and centred on it, at the size the rail head shows it:
+   the two screens are one app and should say so in the same voice. The large
+   one that used to sit off to the right is gone — it was there to fill the
+   space beside a column pinned to the left, and there is no such space now
+   that the column is down the middle. */
 .set-brand{
-  position:absolute; left:200px; top:48px; width:200px; height:58px;
+  position:absolute; left:50%; margin-left:-140px; top:46px;
+  width:280px; height:78px; background-position:center center;
 }
-/* And a large one to the right of the rows. 680px against the 420 it started
-   at, which took narrowing the rows: they were 1100 wide and the value floated
-   to the far end of that, so the eye had a very long way to travel from a
-   label to what it was set to. 980 is shorter for both reasons.
+/* The one screen in the app that is a page rather than a picture, and a
+   flat fill made it look like a dialog that had lost its window. The accent,
+   very faintly, in the corner the title sits in, over a wash that settles
+   towards the bottom. Both layers end on opaque colours, so this still covers
+   the video behind it on a television — which is what the .tv rule above used
+   to be doing for this screen, and why it no longer names it. */
+#view-settings{
+  background:
+    radial-gradient(1100px 620px at 14% 4%, rgba(76,141,255,.14), rgba(76,141,255,0) 62%),
+    linear-gradient(155deg, var(--bg-2) 0%, var(--bg) 58%);
+}
+/* Lighter theme, lighter hand: the same wash reads as a stain at full
+   strength on a pale ground. */
+/* The dark screen's two background tokens are eleven steps apart and the
+   light theme's are seven, so the same recipe came out flat here. Mixed
+   against white at the top and given the accent more of a say, which is what
+   makes it read as a lit surface rather than a fill. */
+html.light #view-settings{
+  background:
+    radial-gradient(1100px 620px at 14% 4%, rgba(43,96,190,.16), rgba(43,96,190,0) 62%),
+    linear-gradient(155deg, #d6dce6 0%, var(--bg-2) 34%, #a7b1c1 100%);
+}
 
-   Held a little back from full strength so it stays a backdrop and does not
-   compete with the row that has the cursor. */
-.set-brand-big{
-  position:absolute; right:60px; top:330px; width:680px; height:227px;
-  opacity:.9;
+/* Down the middle of the 1920 the app draws in. 980 rather than the full
+   width it could have: the value sits at the right-hand end of a row, and on
+   a wider row the eye has that much further to travel from the label to what
+   it is set to. */
+.settings-wrap{ position:absolute; left:470px; top:152px; width:980px; }
+.settings-wrap h1{
+  font-size:52px; font-weight:600; margin-bottom:36px; text-align:center;
 }
-.settings-wrap{ position:absolute; left:200px; top:130px; width:980px; }
-.settings-wrap h1{ font-size:52px; font-weight:600; margin-bottom:44px; }
-#settings-list{ position:relative; height:790px; overflow:hidden; }
-#settings-inner{ position:absolute; top:0; left:0; right:0; transition:transform .12s ease-out; }
+/* A whole number of bubbles. A flat row clipped by the window read as
+   "there is more below"; a bubble clipped halfway through its own curve just
+   reads as broken, so the window is an exact multiple of the pitch and the
+   list scrolls a whole row at a time. */
+#settings-list{ position:relative; height:720px; overflow:hidden; }
+/* Stops short of the right-hand edge, so the track that describes this list
+   has a lane of its own rather than lying across the end of every row. */
+/* No transition. The channel list moves without one and this is meant to
+   feel like the channel list; an animation on something that moves a row at a
+   time only ever arrives late. */
+#settings-inner{ position:absolute; top:0; left:0; right:26px; }
+/* Each option in a bubble of its own: a rounded panel with a hairline
+   round it, set apart from its neighbours by space rather than divided from
+   them by a rule. The radius is a little under a third of the height —
+   rounded enough to read as a bubble, short of the lozenge that a full pill
+   would make of a row this wide. */
 .set-row{
-  position:relative; height:92px; padding:17px 26px 0; margin-bottom:1px;
-  border-radius:14px; white-space:nowrap;
+  position:relative; height:80px; padding:11px 30px 0; margin-bottom:10px;
+  border-radius:24px; white-space:nowrap;
+  background:var(--bg-2); border:1px solid var(--line);
 }
-.set-row:after{
-  content:""; position:absolute; left:26px; right:26px; bottom:0; height:1px;
-  background:rgba(255,255,255,.09);
-}
-html.light .set-row:after{ background:rgba(0,0,0,.10); }
+/* A row with no second line has only its label to hold, so it centres on
+   the label instead of hanging it from the top of the bubble. */
+.set-row.nosub{ padding-top:23px; }
 /* The rows Advanced brings out, set in from the everyday ones. */
 .set-row.adv{ padding-left:56px; }
 .set-row.adv:before{
@@ -1021,8 +1274,27 @@ html.light .set-row:after{ background:rgba(0,0,0,.10); }
   border-radius:2px; background:var(--line);
 }
 .set-row.adv.focused:before{ background:rgba(255,255,255,.55); }
-.set-row.focused{ background:var(--accent); }
-.set-row.focused:after{ display:none; }
+/* The row with the cursor on it, lit rather than filled: a flat accent the
+   width of the column is a lot of one colour, and a gradient across it gives
+   the bubble a direction and a little depth. The shadow is what lifts it off
+   the ones around it — on a television the cursor has to be findable from
+   the far side of a room without hunting for it. */
+.set-row.focused{
+  border-color:var(--accent);
+  background:linear-gradient(118deg, #5f9bff 0%, var(--accent) 44%, #2f6fe0 100%);
+  box-shadow:0 6px 22px rgba(0,0,0,.30);
+}
+/* Darker end to darker end, so the light theme gets the same shape of
+   gradient rather than a wash of the same blue. */
+html.light .set-row.focused{
+  background:linear-gradient(118deg, #3568c4 0%, var(--accent) 44%, #17407f 100%);
+  box-shadow:0 6px 22px rgba(0,0,0,.22);
+}
+/* Mouse only — a television has no pointer, and this is what the browser
+   build shows while somebody is aiming at a row they have not chosen. */
+.set-row:hover:not(.focused){
+  background:linear-gradient(118deg, var(--bg-3) 0%, var(--bg-2) 70%);
+}
 /* Settings is read from a sofa like everything else, and it was the one
    screen still written at desktop sizes: a 26px label over an 18px sub-line in
    the dimmest token the app has. Both go up a size and a contrast step.
@@ -1031,13 +1303,15 @@ html.light .set-row:after{ background:rgba(0,0,0,.10); }
    language, which theme — are heavier again. Everything else is something you
    set once and forget, and a list where every row shouts is a list where
    nothing does. */
-/* Every row is bold. The three that matter — playlist, language, theme — are
-   larger rather than heavier, so there is still a hierarchy: a list where the
-   only difference is weight and everything has it has no hierarchy at all.
+/* The label is bold; nothing else on the row is. The three that matter —
+   playlist, language, theme — are larger rather than heavier, so there is
+   still a hierarchy: a list where the only difference is weight and
+   everything has it has no hierarchy at all.
 
-   The sub-line lives inside the label element, so it inherits the weight
-   unless told otherwise, and a bold explanation under a bold heading is two
-   headings. It is told otherwise for every row, not just the three. */
+   The two things to the right of the weight are the value and the sub-line,
+   and neither is a heading. The sub-line lives inside the label element, so
+   it inherits the weight unless told otherwise, and a bold explanation under
+   a bold heading is two headings. */
 .set-label{
   display:block; line-height:34px; font-size:27px; font-weight:700; color:var(--text);
 }
@@ -1046,10 +1320,200 @@ html.light .set-row:after{ background:rgba(0,0,0,.10); }
 .set-sub{ display:block; font-size:19px; line-height:24px; color:var(--text-mid); }
 .set-row.focused .set-sub{ color:rgba(255,255,255,.86); }
 .set-value{
-  float:right; line-height:34px; font-size:25px; font-weight:600; color:var(--text-mid);
+  float:right; line-height:34px; font-size:25px; font-weight:400; color:var(--text-mid);
 }
 .set-row.focused .set-value{ color:#fff; }
 .set-row.focused .set-label{ color:#fff; }
+
+/* And, under the list, the same news said out loud: a triangle pointing at
+   what has not been reached yet. The hairline is honest but quiet, and this
+   screen is read from the far side of a room. Drawn from borders like every
+   other mark in the app — a glyph is at the mercy of whatever font the TV
+   falls back to. */
+.more-below{
+  display:block; margin:16px auto 0; width:0; height:0;
+  border-top:11px solid var(--text-dim);
+  border-left:9px solid transparent; border-right:9px solid transparent;
+  opacity:0; transition:opacity .14s linear;
+}
+.more-below.on{ opacity:1; }
+
+/* A hairline saying how much list there is and where in it you are, for the
+   boxes that scroll without a scrollbar. The guide panel grew one of these
+   first; this is the same thing where anything else needs it. Only shown when
+   there is genuinely more than fits, so a short list is not decorated with a
+   full-length thumb that cannot move. */
+/* Thick enough to see from a sofa. The guide panel's is 3px because it sits
+   inside a dense list of programmes and only has to hint; this one is the
+   answer to "is there more?" and should not need looking for. */
+.vtrack{
+  position:absolute; right:6px; top:8px; bottom:8px; width:8px;
+  border-radius:4px; background:rgba(255,255,255,.13);
+  opacity:0; transition:opacity .12s linear; z-index:2;
+}
+html.light .vtrack{ background:rgba(0,0,0,.16); }
+.scrolls .vtrack{ opacity:1; }
+.vtrack b{
+  position:absolute; left:0; width:8px; border-radius:4px;
+  background:var(--text-mid); transition:top .12s ease-out;
+}
+
+
+/* A hand's width of nothing at each edge of the browse screen, with an
+   arrow in it: press this way and there is more. The left one is the folded
+   rail — going left again opens the drawer — and the right one is the panel
+   beside the picture. Neither is a control; they are a sign that the screen
+   continues. */
+.edge{
+  position:absolute; top:0; bottom:0; width:26px; z-index:3;
+  background:var(--bg-2); border-right:1px solid var(--line);
+  pointer-events:none;
+}
+.edge:after{
+  content:""; position:absolute; top:50%; margin-top:-7px; left:8px;
+  width:0; height:0;
+  border-top:7px solid transparent; border-bottom:7px solid transparent;
+}
+/* Pointing the way it opens. */
+.edge-left:after{ border-right:8px solid var(--text-dim2); }
+/* Only the lower half. The preview picture fills the top right of this
+   screen, and a strip of furniture down the side of it is furniture over
+   somebody's television. */
+.edge-right{
+  right:0; left:auto; top:585px; border-right:0; border-left:1px solid var(--line);
+}
+.edge-right:after{ border-left:8px solid var(--text-dim2); left:auto; right:8px; }
+/* On the browse screen the left edge *is* the folded rail, so it is drawn
+   only while the rail is folded. On every other screen it is a sign that left
+   goes back toward the menu, and is always there. */
+.edge-rail{ display:none; }
+#stage.rail-in .edge-rail{ display:block; }
+/* And the other way round: inside the rail, left opens the drawer, so the
+   sign moves one panel in rather than disappearing. It stands in the
+   rail's own left padding, over the rail's own colour, which leaves it a
+   hairline and an arrow rather than a slab. */
+.edge-drawer{ display:block; }
+#stage.rail-in .edge-drawer{ display:none; }
+
+/* The newer-build strip. Top centre, over everything, and on its way out
+   from the moment it arrives: it is news, not a question. Nothing about it
+   takes focus — the remote never has to deal with it. */
+#update-note{
+  position:absolute; top:22px; left:50%; transform:translateX(-50%);
+  z-index:12; max-width:1100px;
+  padding:14px 30px; border-radius:26px;
+  background:rgba(12,16,24,.92); border:1px solid var(--accent);
+  color:var(--text); font-size:22px; line-height:30px; white-space:nowrap;
+  box-shadow:0 10px 34px rgba(0,0,0,.45);
+  opacity:1; transition:opacity .4s linear;
+}
+html.light #update-note{ background:rgba(232,236,243,.95); }
+#update-note.hidden{ display:none; }
+#update-note.going{ opacity:0; }
+#update-note .ico{ width:26px; height:26px; margin-right:16px; color:var(--accent); }
+#update-text{ vertical-align:middle; }
+
+/* ============================ SEARCH ============================ */
+#find{
+  position:absolute; top:0; left:0; width:1920px; height:1080px; z-index:10;
+  background:rgba(6,8,12,.62);
+}
+html.light #find{ background:rgba(20,24,33,.38); }
+.find-box{
+  position:absolute; left:410px; top:110px; width:1100px; height:860px;
+  border-radius:28px; border:1px solid var(--line);
+  background:
+    radial-gradient(760px 460px at 14% 4%, rgba(76,141,255,.14), rgba(76,141,255,0) 62%),
+    linear-gradient(160deg, var(--bg-2) 0%, var(--bg) 58%);
+  box-shadow:0 24px 70px rgba(0,0,0,.5);
+}
+html.light .find-box{
+  background:
+    radial-gradient(760px 460px at 14% 4%, rgba(43,96,190,.16), rgba(43,96,190,0) 62%),
+    linear-gradient(160deg, #d6dce6 0%, var(--bg-2) 40%, #a7b1c1 100%);
+}
+.find-head{ padding:26px 32px 18px; white-space:nowrap; }
+.find-head .ico{ width:32px; height:32px; margin-right:18px; color:var(--text-dim); }
+#find-input{
+  display:inline-block; vertical-align:middle; width:990px; height:70px;
+  padding:0 22px; font-family:inherit; font-size:27px; color:var(--text);
+  background:var(--bg-3); border:2px solid var(--line); border-radius:14px;
+  outline:none;
+}
+#find-input.focused{ border-color:var(--accent); }
+.find-scroll{ position:relative; height:600px; margin:0 22px; overflow:hidden; }
+#find-list{ position:absolute; top:0; left:0; right:26px; }
+/* A result is a bubble like everything else, and says which of the two kinds
+   it is: a channel, or something on at a time. */
+.fd-row{
+  position:relative; height:86px; margin:0 0 10px; padding:12px 24px;
+  border-radius:22px; background:var(--bg-2); border:1px solid var(--line);
+  white-space:nowrap; overflow:hidden;
+}
+.fd-row.focused{
+  border-color:var(--accent); color:#fff;
+  background:linear-gradient(118deg, #5f9bff 0%, var(--accent) 44%, #2f6fe0 100%);
+}
+html.light .fd-row.focused{
+  background:linear-gradient(118deg, #3568c4 0%, var(--accent) 44%, #17407f 100%);
+}
+.fd-logo{
+  display:inline-block; vertical-align:middle; width:64px; height:44px;
+  margin-right:18px;
+  background-repeat:no-repeat; background-position:center; background-size:contain;
+}
+.fd-text{ display:inline-block; vertical-align:middle; max-width:920px; }
+.fd-title{
+  display:block; font-size:25px; font-weight:600; line-height:30px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.fd-sub{
+  display:block; font-size:18px; line-height:24px; color:var(--text-dim);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.fd-row.focused .fd-sub{ color:rgba(255,255,255,.84); }
+.find-empty{
+  position:absolute; left:0; right:0; top:420px; text-align:center;
+  font-size:24px; color:var(--text-dim2);
+}
+.find-empty.hidden{ display:none; }
+.find-foot{
+  position:absolute; left:32px; bottom:26px; font-size:19px; color:var(--text-dim2);
+}
+.find-foot span{ margin-right:28px; }
+
+/* ============================ ICONS ============================ */
+/* Line drawings masked out of the row's own colour, rather than emoji.
+   Emoji are somebody else's artwork: whatever style the platform's font
+   has, at whatever weight, in colours that owe nothing to the app — and on
+   a television as likely as not a box. A mask takes its colour from the
+   element, so these match the words beside them and turn white with them
+   when a row takes the cursor. -webkit-mask-image lands in Chromium 55 and
+   the TV is on 56. */
+.ico{
+  display:inline-block; vertical-align:middle;
+  width:30px; height:30px; background-color:currentColor;
+  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+  -webkit-mask-position:center center; mask-position:center center;
+  -webkit-mask-size:contain; mask-size:contain;
+}
+.ico-search{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5 L21 21'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5 L21 21'/%3E%3C/svg%3E"); }
+.ico-calendar{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5.5' width='17' height='15' rx='2'/%3E%3Cpath d='M3.5 10.5h17M8 3.5v4M16 3.5v4'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='5.5' width='17' height='15' rx='2'/%3E%3Cpath d='M3.5 10.5h17M8 3.5v4M16 3.5v4'/%3E%3C/svg%3E"); }
+.ico-playlist{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h10'/%3E%3Ccircle cx='17.5' cy='16.5' r='2.5'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h10'/%3E%3Ccircle cx='17.5' cy='16.5' r='2.5'/%3E%3C/svg%3E"); }
+.ico-replay{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.4-5.7'/%3E%3Cpath d='M20 3.5V8h-4.5'/%3E%3Cpath d='M12 7.5V12l3 2'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.4-5.7'/%3E%3Cpath d='M20 3.5V8h-4.5'/%3E%3Cpath d='M12 7.5V12l3 2'/%3E%3C/svg%3E"); }
+.ico-sliders{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1'/%3E%3Ccircle cx='15' cy='7' r='2'/%3E%3Ccircle cx='9' cy='12' r='2'/%3E%3Ccircle cx='17' cy='17' r='2'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1'/%3E%3Ccircle cx='15' cy='7' r='2'/%3E%3Ccircle cx='9' cy='12' r='2'/%3E%3Ccircle cx='17' cy='17' r='2'/%3E%3C/svg%3E"); }
+.ico-reload{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.4-5.7'/%3E%3Cpath d='M20 3.5V8h-4.5'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.4-5.7'/%3E%3Cpath d='M20 3.5V8h-4.5'/%3E%3C/svg%3E"); }
+.ico-keyboard{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='6.5' width='19' height='11' rx='2'/%3E%3Cpath d='M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M8 13.5h8'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='6.5' width='19' height='11' rx='2'/%3E%3Cpath d='M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M8 13.5h8'/%3E%3C/svg%3E"); }
+.ico-exit{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 4.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 19.5h8'/%3E%3Cpath d='M12 12h9M17.5 8.5 21 12l-3.5 3.5'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 4.5H6a1.5 1.5 0 0 0-1.5 1.5v12A1.5 1.5 0 0 0 6 19.5h8'/%3E%3Cpath d='M12 12h9M17.5 8.5 21 12l-3.5 3.5'/%3E%3C/svg%3E"); }
+.ico-about{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 11v5.5'/%3E%3Ccircle cx='12' cy='7.8' r='.9' fill='black' stroke='none'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 11v5.5'/%3E%3Ccircle cx='12' cy='7.8' r='.9' fill='black' stroke='none'/%3E%3C/svg%3E"); }
+.ico-live{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4' fill='black' stroke='none'/%3E%3Cpath d='M6.5 6.5a7.8 7.8 0 0 0 0 11M17.5 6.5a7.8 7.8 0 0 1 0 11'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4' fill='black' stroke='none'/%3E%3Cpath d='M6.5 6.5a7.8 7.8 0 0 0 0 11M17.5 6.5a7.8 7.8 0 0 1 0 11'/%3E%3C/svg%3E"); }
+.ico-shrink{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 4.5v5h-5M14.5 19.5v-5h5'/%3E%3Cpath d='M9.5 9.5 4 4M14.5 14.5 20 20'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 4.5v5h-5M14.5 19.5v-5h5'/%3E%3Cpath d='M9.5 9.5 4 4M14.5 14.5 20 20'/%3E%3C/svg%3E"); }
+.ico-play{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 5.5 19 12 8 18.5Z' fill='black' stroke='none'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 5.5 19 12 8 18.5Z' fill='black' stroke='none'/%3E%3C/svg%3E"); }
+.ico-star{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l2.7 5.6 6.1.8-4.5 4.2 1.2 6.1L12 17.2 6.5 20.2l1.2-6.1L3.2 9.9l6.1-.8Z'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5l2.7 5.6 6.1.8-4.5 4.2 1.2 6.1L12 17.2 6.5 20.2l1.2-6.1L3.2 9.9l6.1-.8Z'/%3E%3C/svg%3E"); }
+.ico-numbers{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='17' height='17' rx='2'/%3E%3Cpath d='M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='17' height='17' rx='2'/%3E%3Cpath d='M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17'/%3E%3C/svg%3E"); }
+.ico-lock{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='9.5' rx='2'/%3E%3Cpath d='M8 10.5V7.5a4 4 0 0 1 8 0v3'/%3E%3Ccircle cx='12' cy='15.2' r='1.3' fill='black' stroke='none'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='9.5' rx='2'/%3E%3Cpath d='M8 10.5V7.5a4 4 0 0 1 8 0v3'/%3E%3Ccircle cx='12' cy='15.2' r='1.3' fill='black' stroke='none'/%3E%3C/svg%3E"); }
+.ico-unlock{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='9.5' rx='2'/%3E%3Cpath d='M8 10.5V7.5a4 4 0 0 1 7.6-1.7'/%3E%3Ccircle cx='12' cy='15.2' r='1.3' fill='black' stroke='none'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='9.5' rx='2'/%3E%3Cpath d='M8 10.5V7.5a4 4 0 0 1 7.6-1.7'/%3E%3Ccircle cx='12' cy='15.2' r='1.3' fill='black' stroke='none'/%3E%3C/svg%3E"); }
+.ico-tv{ -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='6.5' width='19' height='13' rx='2'/%3E%3Cpath d='M8 3l4 3.5L16 3'/%3E%3C/svg%3E"); mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='6.5' width='19' height='13' rx='2'/%3E%3Cpath d='M8 3l4 3.5L16 3'/%3E%3C/svg%3E"); }
 
 /* ============================ SIDE MENU ============================ */
 #sidemenu{
@@ -1057,30 +1521,44 @@ html.light .set-row:after{ background:rgba(0,0,0,.10); }
   background:rgba(6,8,12,.58);
 }
 html.light #sidemenu{ background:rgba(20,24,33,.34); }
+/* The same lit surface the settings screen has, for the same reason: a flat
+   fill the height of the screen reads as a dialog that has lost its window. */
 .sm-panel{
   position:absolute; top:0; left:0; width:580px; height:1080px;
-  background:var(--bg-2); border-right:1px solid var(--line); padding-top:44px;
+  border-right:1px solid var(--line); padding-top:44px;
+  background:
+    radial-gradient(680px 520px at 12% 4%, rgba(76,141,255,.16), rgba(76,141,255,0) 64%),
+    linear-gradient(168deg, var(--bg-3) 0%, var(--bg-2) 46%, var(--bg) 100%);
+}
+html.light .sm-panel{
+  background:
+    radial-gradient(680px 520px at 12% 4%, rgba(43,96,190,.16), rgba(43,96,190,0) 64%),
+    linear-gradient(168deg, #d6dce6 0%, var(--bg-2) 40%, #a7b1c1 100%);
 }
 /* The drawer used to head itself with the app's name spelled out in letter-
    spaced capitals, which is a wordmark drawn badly. Now it is the wordmark.
    240px in a 580px panel leaves it room on both sides and matches the weight
    the rail head has. */
 .sm-brand{ padding:0 36px 30px; }
-.sm-logo{ width:240px; height:76px; }
+.sm-logo{ width:228px; height:76px; }   /* 3:1, the shape of the mark */
+/* Bubbles, like the settings rows: separated by space rather than divided
+   by a rule, and the one with the cursor lit by a gradient across it rather
+   than filled flat. */
 .sm-row{
-  position:relative; height:88px; line-height:88px; margin:0 14px; padding:0 22px;
-  border-radius:14px; font-size:30px; color:var(--text);
+  position:relative; height:80px; line-height:78px; margin:0 20px 10px;
+  padding:0 22px; border-radius:24px; font-size:28px; color:var(--text);
+  background:var(--bg-2); border:1px solid var(--line);
 }
-/* The same hairline the settings list has, for the same reason: a column of
-   evenly spaced words is hard to count from across a room. */
-.sm-row:after{
-  content:""; position:absolute; left:24px; right:24px; bottom:0; height:1px;
-  background:rgba(255,255,255,.09);
+.sm-row.focused{
+  color:#fff; border-color:var(--accent);
+  background:linear-gradient(118deg, #5f9bff 0%, var(--accent) 44%, #2f6fe0 100%);
+  box-shadow:0 6px 22px rgba(0,0,0,.30);
 }
-html.light .sm-row:after{ background:rgba(0,0,0,.10); }
-.sm-row:last-child:after{ display:none; }
-.sm-row.focused{ background:var(--accent); color:#fff; }
-.sm-row.focused:after{ display:none; }
+html.light .sm-row.focused{
+  background:linear-gradient(118deg, #3568c4 0%, var(--accent) 44%, #17407f 100%);
+  box-shadow:0 6px 22px rgba(0,0,0,.22);
+}
+.sm-foot #sm-foot-right{ float:right; color:var(--text-dim2); }
 .sm-foot{
   position:absolute; left:38px; right:38px; bottom:30px;
   font-size:16px; color:var(--text-dim2);
@@ -1253,16 +1731,28 @@ html.light .cg-chan:after{ background:rgba(0,0,0,.08); }
 }
 .cg-chan.focused .cg-chname{ color:#fff; }
 
+/* The days the guide covers, as a row of chips above the schedule. Picking
+   the day first is fewer presses than scrolling past it, and it is how
+   somebody thinks about an evening.
+
+   The row scrolls sideways rather than wrapping: a fortnight of guide is
+   wider than the pane, and a strip that wraps stops being a strip. */
+.cg-days-box{
+  position:absolute; left:0; right:0; top:96px; height:84px;
+  padding:0 40px; overflow:hidden; border-bottom:1px solid var(--line);
+}
+#cg-days{ position:relative; white-space:nowrap; padding-top:14px; }
+.cg-daychip{
+  display:inline-block; height:54px; line-height:54px; padding:0 26px;
+  margin-right:12px; border-radius:27px; font-size:23px;
+  color:var(--text-mid); background:var(--bg-2);
+}
+.cg-daychip.selected{ background:var(--bg-3); color:var(--text); font-weight:600; }
+.cg-daychip.focused{ background:var(--accent); color:#fff; font-weight:600; }
 .cg-right{ position:absolute; left:560px; right:0; top:0; height:1080px; }
-.cg-scroller{ position:absolute; left:0; right:0; top:96px; bottom:0; padding:0 40px; overflow:hidden; }
+.cg-scroller{ position:absolute; left:0; right:0; top:180px; bottom:0; padding:0 40px; overflow:hidden; }
 #cg-progs{ position:relative; }
 
-/* A schedule that runs past midnight has to say so, or the times count back
-   to nine in the morning with no explanation. */
-.cg-day{
-  height:56px; line-height:64px; font-size:20px; letter-spacing:.14em;
-  text-transform:uppercase; color:var(--text-dim2);
-}
 
 .cg-prog{
   position:relative; height:88px; padding:16px 22px 0; border-radius:14px;
@@ -1410,13 +1900,30 @@ html.light .cg-prog{ border-bottom-color:rgba(0,0,0,.10); }
 /* Six rows deep. More than that and it is a screen; fewer and a ten-item
    list spends its life scrolling. */
 .picker-scroll{ position:relative; height:468px; overflow:hidden; }
-#picker-list{ position:absolute; top:0; left:0; right:0; }
+/* Short of the edge, for the same reason as the settings list. */
+#picker-list{ position:absolute; top:0; left:0; right:26px; }
 .picker-row{
   height:78px; line-height:78px; margin:0 14px; padding:0 24px;
   border-radius:14px; font-size:27px; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .picker-row.focused{ background:var(--accent); color:#fff; }
+/* Which one is in use. A tick rather than a word, so the row still reads as
+   the thing it names. Drawn from two borders — no glyph, the same rule the
+   heart and the replay clock follow. */
+.picker-row.current{ font-weight:700; }
+.picker-tick{
+  display:inline-block; margin-left:16px; vertical-align:middle;
+  width:9px; height:17px; border:solid var(--accent);
+  border-width:0 3px 3px 0; transform:rotate(45deg) translate(-2px, -3px);
+}
+.picker-row.focused .picker-tick{ border-color:#fff; }
+/* Set apart from the things being chosen between: adding a playlist is not a
+   playlist. */
+.picker-row.apart{
+  margin-top:10px; border-top:1px solid var(--line);
+  padding-top:0; color:var(--text-mid);
+}
 .picker-foot{
   padding:20px 38px 4px; font-size:18px; color:var(--text-dim2);
   border-top:1px solid var(--line); margin-top:14px;
@@ -1449,8 +1956,7 @@ html.light .confirm-logo{ background-color:rgba(0,0,0,.05); }
    this is a dialog over a picture somebody is watching. */
 .confirm-desc{
   margin-top:18px; font-size:21px; line-height:29px; color:var(--text-mid);
-  max-height:116px; overflow:hidden;
-  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4;
+  max-height:180px; overflow:hidden; white-space:pre-line;
 }
 .confirm-actions{ text-align:right; font-size:0; }
 .confirm-actions .btn{ margin:0 0 0 16px; }

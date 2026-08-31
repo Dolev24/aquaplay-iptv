@@ -1,7 +1,7 @@
 # AquaPlay for Android TV
 
 The shell. Everything a viewer sees lives in `../app` — this is a WebView, a
-decoder and a key map, about 700 lines of Kotlin, whose job is to give that web
+decoder and a key map, about 1,200 lines of Kotlin, whose job is to give that web
 app the three things a browser will not.
 
 ```
@@ -103,3 +103,58 @@ real device, roughly in order of how likely it is to be wrong:
 `com.aquaplay.tv`. Change it in `app/build.gradle.kts` (`applicationId` and
 `namespace`) and in the `package` line of the three Kotlin files if it needs to
 be something else before it is published anywhere.
+
+## Building one to keep
+
+Everything above builds the **debug** variant, and a debug APK is not a
+thing to leave on a television. `WebView.setWebContentsDebuggingEnabled` is
+on in it, so anyone who can reach the box over adb can attach to the app's
+page and drive it — which is precisely how this project is tested, and
+precisely what should not be sitting in a living room. It is also unshrunk:
+5.3 MB against the release build's 1.2 MB.
+
+```bash
+./gradlew assembleRelease
+```
+
+Without a signing key that produces `app-release-unsigned.apk`, which is
+useful for checking that shrinking broke nothing and which no device will
+install. To get an installable one, make a key and point the build at it:
+
+```bash
+keytool -genkeypair -v -keystore aquaplay.jks -alias aquaplay \
+        -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Keep that file outside the repository, and write `android/keystore.properties`
+(gitignored, along with `*.jks`) pointing at it:
+
+```properties
+storeFile=C:/keys/aquaplay.jks
+storePassword=...
+keyAlias=aquaplay
+keyPassword=...
+```
+
+**Lose that key and you cannot update the app** — Android will not accept a
+new version signed by a different one, only an uninstall and a fresh install
+with everything the app had stored gone with it. Back it up somewhere that
+is not this machine.
+
+### What release changes, and the one rule it depends on
+
+R8 shrinks and renames everything it can prove is unused. Every method on
+`PlayerBridge` is called by name from JavaScript and by nothing whatsoever
+from Kotlin, so left to itself R8 removes the entire player and the app
+boots to a screen that never plays. `proguard-rules.pro` keeps them:
+
+```
+-keepclassmembers class com.aquaplay.tv.** {
+    @android.webkit.JavascriptInterface <methods>;
+}
+```
+
+That rule is load-bearing, and `test-units.js` fails without it. The release
+build has been driven end to end on a television image — playlist added,
+guide parsed, channel played — to confirm the bridge survives shrinking; a
+passing build is not on its own evidence that it does.

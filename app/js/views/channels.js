@@ -58,7 +58,7 @@
      fallen, and on a live edge it never recovers on its own. */
   var driftTimer = null, driftMs = 0, lastReal = 0, lastMedia = 0;
   var buffering = false, bufferTimer = null;
-  var DRIFT_WARN = 5000;      // worth saying once it is seconds, not frames
+  var DRIFT_WARN = 10000;     // five was inside what a stream recovers from
   var stallFocus = false;      // the "stream is behind" badge has the cursor
   var liveFocus = false;       // the info bar's "Back to live" has the cursor
   var reconnects = 0, reconnectTimer = null;
@@ -116,10 +116,17 @@
 
   VList.prototype._render = function () {
     var first = Math.max(0, Math.floor(this.top / this.rowH) - 1);
+    var n = this.pool.length;
     var used = 0;
-    for (var i = 0; i < this.pool.length; i++) {
+    for (var i = 0; i < n; i++) {
       var idx = first + i;
-      var node = this.pool[i];
+      /* Which node draws a row is decided by the row, not by where it sits in
+         the window. The window is n rows wide and the residues of n index the
+         pool exactly once across it, so the same nodes are on screen either
+         way — but scrolling down by one used to shift every node's index by
+         one and rewrite all of them. Now one node is rebound and the rest are
+         moved, which is a transform and nothing else. */
+      var node = this.pool[idx % n];
       if (idx >= this.n) { if (node.style.display !== 'none') node.style.display = 'none'; node._idx = -1; continue; }
       node.style.display = '';
       node.style.transform = 'translateY(' + (idx * this.rowH - this.top) + 'px)';
@@ -153,7 +160,7 @@
     startTimers();
   };
 
-  /* Which list to open on. The pinned rows are always All/Favourites/Recent. */
+  /* Which list to open on. The pinned rows are always All/Favorites/Recent. */
   var START_GROUP = { all: 0, fav: 1, recent: 2 };
   function startGroupIdx() {
     return START_GROUP[Store.settings().startGroup] || 0;
@@ -195,7 +202,7 @@
     }
     groups = [
       { id: '__all', name: ALL_LABEL[kind] || 'All', count: all.length, kind: 'all' },
-      { id: '__fav', name: 'Favourites', count: 0, kind: 'fav' },
+      { id: '__fav', name: 'Favorites', count: 0, kind: 'fav' },
       { id: '__recent', name: 'Recently watched', count: 0, kind: 'recent' }
     ].concat(provided);
 
@@ -308,7 +315,7 @@
           return;
         case 'full':     watchFullscreen(); return;
         case 'fav':      toggleFav(); return;
-        case 'search':   enterSearch(); return;
+        case 'search':   enterFind(); return;
         case 'info':     enterGuide(); return;
         case 'settings': App.openSettings(); return;
       }
@@ -384,11 +391,19 @@
   /* The rails shrink when the section strip is visible, so the virtual lists
      take their viewport from the DOM rather than a hard-coded constant. Only
      valid once the view is on screen. */
+  /* The guide panel's height. Read here rather than in ensureGuideVisible,
+     which runs on every cursor move: the rows painted just before it leave
+     layout dirty, so asking for clientHeight there forced the whole page to
+     be laid out again for a number that only changes with the window. */
+  var guideBoxH = 0;
+
   function measure() {
     if (!chList) return;
     var cs = U.$('channel-scroller'), gs = U.$('group-scroller');
     if (cs.clientHeight) chList.viewport = cs.clientHeight;
     if (gs.clientHeight) grList.viewport = gs.clientHeight;
+    var es = U.$('epg-scroller');
+    if (es && es.clientHeight) guideBoxH = es.clientHeight;
   }
 
   C.show = function () {
@@ -404,6 +419,16 @@
     U.$('view-series').classList.add('hidden');
     measure();
     paintBadge();
+    repaintAll();
+  };
+
+  /* Put the cursor back on the rail, so the bar is open and focused. Used
+     when a full-screen view closes: those are all opened from the drawer, and
+     coming back to a folded rail leaves the viewer somewhere they did not
+     start from with no sign of the way back. */
+  C.focusRail = function () {
+    pane = 'groups';
+    railFoot = -1;
     repaintAll();
   };
 
@@ -671,24 +696,60 @@
     }
     node.classList.toggle('pinned', g.kind !== 'group');
     node.classList.toggle('selected', idx === groupIdx);
-    node.classList.toggle('focused', pane === 'groups' && idx === groupIdx);
+    /* railFoot is where the cursor is once it has gone past the end of the
+       list — on Settings, at the foot of the rail. Without asking, the group
+       stayed lit as the cursor moved onto Settings and two things on screen
+       claimed to be the cursor at once. The group keeps 'selected', which is
+       a different statement: this is the list you are looking at. */
+    node.classList.toggle('focused',
+      pane === 'groups' && railFoot < 0 && idx === groupIdx);
+  }
+
+  /* Built once per pooled row, then only ever written into.
+
+     This used to rebuild the row with innerHTML on every recycle: eight
+     elements thrown away and eight parsed back for each of eighteen rows, on
+     every keypress. Holding the down key made that the whole frame — and
+     because the logo span was new each time, its picture was asked for again
+     from scratch, so a fast scroll left a column of blanks that filled in
+     seconds later. Same DOM at the end of it; nothing rebuilt to get there. */
+  function buildChannelRow(node) {
+    node.innerHTML =
+      '<span class="ch-num"></span><span class="ch-logo blank"></span>' +
+      '<span class="ch-text"><span class="ch-name"></span>' +
+      '<span class="ch-now"><i class="ch-at"></i><span class="ch-what"></span></span>' +
+      '</span>' +
+      '<span class="ch-right"><span class="ch-lock"></span><span class="ch-fav"></span>' +
+      '<span class="ch-prog"><i></i></span></span>';
+    node._num  = node.querySelector('.ch-num');
+    node._logo = node.querySelector('.ch-logo');
+    node._name = node.querySelector('.ch-name');
+    node._at   = node.querySelector('.ch-at');
+    node._what = node.querySelector('.ch-what');
+    node._bar  = node.querySelector('.ch-prog');
+    node._fav  = node.querySelector('.ch-fav');
+    node._lock = node.querySelector('.ch-lock');
+    node._logoUrl = '';
+    node._built = true;
   }
 
   function paintChannelRow(node, idx, changed) {
     var c = view[idx];
     if (!c) return;
+    if (!node._built) buildChannelRow(node);
     if (changed) {
-      var logo = c.logo
-        ? '<span class="ch-logo" style="background-image:url(&quot;' + U.esc(c.logo) + '&quot;)"></span>'
-        : '<span class="ch-logo blank"></span>';
-      // Source order matters now that the row is a flex box.
-      node.innerHTML =
-        '<span class="ch-num"></span>' + logo +
-        '<span class="ch-text"><span class="ch-name">' + U.esc(c.name) + '</span>' +
-        '<span class="ch-now"></span></span>' +
-        '<span class="ch-right"><span class="ch-lock"></span><span class="ch-fav"></span><span class="ch-prog"><i></i></span></span>';
+      node._name.textContent = c.name;
+      /* Only when it actually differs. Two rows running with the same logo
+         is common — a provider's HD and SD copies of one channel — and
+         re-setting the property would fetch it again for nothing. */
+      var url = c.logo || '';
+      if (url !== node._logoUrl) {
+        node._logo.style.backgroundImage = url ? 'url("' + url + '")' : '';
+        node._logo.className = 'ch-logo' + (url ? '' : ' blank');
+        node._logoUrl = url;
+      }
     }
-    var numEl = node.querySelector('.ch-num');
+    var numEl = node._num;
     numEl.textContent = numOf(c) || (idx + 1);
     /* Amber means "you moved this one", so a number that matches the playlist
        is not amber even if a record of it survives. */
@@ -696,12 +757,12 @@
     numEl.classList.toggle('custom', !!over && over !== c.num);
     paintRowEpg(node, c);
     // Drawn in CSS, never a glyph: no font on the TV is guaranteed to have one.
-    node.querySelector('.ch-fav').className =
+    node._fav.className =
       'ch-fav' + (Store.isFav(profile.id, c.key) ? ' on' : '');
     /* Only ever seen while the session is unlocked — a locked channel is not
        in the list at all otherwise — so this is the parent's own view of what
        they have put away. Drawn in CSS for the same reason as the star. */
-    node.querySelector('.ch-lock').className =
+    node._lock.className =
       'ch-lock' + (Store.isLocked(profile.id, c.key) ? ' on' : '');
     node.classList.toggle('focused', pane === 'channels' && idx === chIdx);
     node.classList.toggle('playing', c.key === playingKey);
@@ -713,18 +774,70 @@
   }
 
   function paintRowEpg(node, c) {
-    var nowEl = node.querySelector('.ch-now');
-    var bar = node.querySelector('.ch-prog');
+    if (!node._built) buildChannelRow(node);
+    var bar = node._bar;
     // Only live TV has a guide; a movie named "BBC One" must not borrow one.
     var nn = (section === 'live' && EPG.hasData()) ? EPG.nowNext(c) : null;
+    /* Two spans rather than one string. They were a start time and a
+       programme title run together with two spaces between them, which at
+       this size is no separation at all — the eye reads one long label and
+       has to find the boundary itself. Separately they can be told apart by
+       weight and colour, which is what tells them apart. */
     if (nn && nn.now) {
-      nowEl.textContent = U.hhmm(new Date(nn.now.s)) + '  ' + nn.now.t;
+      node._at.textContent = U.hhmm(new Date(nn.now.s));
+      node._what.textContent = nn.now.t;
       bar.style.visibility = 'visible';
       bar.firstChild.style.width = EPG.progress(nn.now) + '%';
     } else {
-      nowEl.textContent = c.group || '';
+      node._at.textContent = '';
+      node._what.textContent = c.group || '';
       bar.style.visibility = 'hidden';
     }
+  }
+
+  /* ---------------- logo warming ----------------
+
+     A row paints its logo immediately only if the picture is already in the
+     browser's cache. Otherwise the request goes out through the shell, and
+     even served from its disk cache that round trip is long enough that a
+     fast scroll shows a column of gaps that fill in afterwards.
+
+     So ask for them a little before they are needed. Measured: a preload
+     costs one request and the row's own use then costs none at all. The
+     Image objects are held so the pictures stay in the cache, and the number
+     held is capped — a playlist can be thousands of channels long and this
+     must not turn into a picture of every one of them. */
+  var warmed = {}, warmOrder = [], warmQueue = [], warmTimer = null;
+  var WARM_AHEAD = 50, WARM_MAX = 150;
+  /* A few at a time, between frames. Three every 30ms is a hundred a second,
+     which is well ahead of a held key at twenty-five rows a second. */
+  var WARM_BATCH = 3, WARM_TICK = 30;
+
+  function warmLogos() {
+    if (!view.length) return;
+    var from = Math.max(0, chIdx - WARM_AHEAD);
+    var to = Math.min(view.length, chIdx + WARM_AHEAD);
+    for (var i = from; i < to; i++) {
+      var u = view[i] && view[i].logo;
+      if (!u || warmed[u]) continue;
+      warmed[u] = true;                 // claimed, so it is queued only once
+      warmOrder.push(u);
+      warmQueue.push(u);
+      if (warmOrder.length > WARM_MAX) delete warmed[warmOrder.shift()];
+    }
+    if (warmQueue.length && !warmTimer) warmTimer = setTimeout(drainWarm, WARM_TICK);
+  }
+
+  function drainWarm() {
+    warmTimer = null;
+    for (var i = 0; i < WARM_BATCH && warmQueue.length; i++) {
+      var u = warmQueue.shift();
+      if (!warmed[u]) continue;         // dropped out of the window meanwhile
+      var img = new Image();
+      warmed[u] = img;                  // held, so the picture stays cached
+      img.src = u;
+    }
+    if (warmQueue.length) warmTimer = setTimeout(drainWarm, WARM_TICK);
   }
 
   function repaintAll() {
@@ -741,6 +854,7 @@
       : '';
     U.$('channel-empty').classList.toggle('hidden', view.length > 0);
     paintPreviewMeta();
+    warmLogos();
   }
 
   function repaintFocusOnly() {
@@ -749,6 +863,7 @@
     chList.render();
     U.$('channel-count').textContent = view.length ? (chIdx + 1) + ' / ' + view.length : '';
     paintPreviewMeta();
+    warmLogos();
   }
 
   /* The meta block and guide describe the FOCUSED channel, which is not
@@ -756,13 +871,25 @@
   function paintPreviewMeta() {
     var c = view[chIdx];
     U.$('pm-name').textContent = c ? c.name : '';
+    /* The same picture as the row it came from, at the size this panel has
+       room for. Set only when it changes: this runs on every cursor move. */
+    var pmLogo = U.$('pm-logo');
+    var url = (c && c.logo) || '';
+    if (url !== pmLogo._url) {
+      pmLogo.style.backgroundImage = url ? 'url("' + url + '")' : '';
+      pmLogo.className = 'pm-logo' + (url ? '' : ' blank');
+      pmLogo._url = url;
+    }
     var nn = (c && section === 'live' && EPG.hasData()) ? EPG.nowNext(c) : null;
     var meta = U.$('preview-meta');
 
     if (nn && nn.now) {
       var pct = EPG.progress(nn.now);
+      /* Times only. The programme's name is the first row of the guide
+         directly underneath, and saying it twice in four inches of screen
+         made the panel look like it was repeating itself. */
       U.$('pm-now').textContent = U.hhmm(new Date(nn.now.s)) + '–' +
-        U.hhmm(new Date(nn.now.e)) + '  ' + nn.now.t;
+        U.hhmm(new Date(nn.now.e));
       U.$('pm-left').textContent = timeLeft(nn.now);
       U.$('pm-bar-fill').style.width = pct + '%';
       U.$('pm-knob').style.left = pct + '%';
@@ -819,7 +946,10 @@
      PANEL_VIEW must stay equal to `.epg-scroller`'s height in rows, and
      GUIDE_H to `.epg-row`'s height, or the row on air stops being centred by
      arithmetic and starts being centred by luck. */
-  var PANEL_ROWS = 9, PANEL_BEFORE = 4, PANEL_VIEW = 5;
+  /* Ten programmes, five of them visible and five to scroll through —
+     counted rather than measured in hours, so the panel holds the same amount
+     whatever the provider's programmes happen to be long. */
+  var PANEL_ROWS = 10, PANEL_BEFORE = 4, PANEL_VIEW = 5;
 
   /* Two ways to read a panel this size. Centred is the default: what is on
      in the middle, with what has just been on above it — that is the shape
@@ -998,16 +1128,26 @@
     ensureGuideVisible(animate);
   }
 
-  /* Setting the offset without a transition takes a forced reflow between
-     turning it off and back on, or the browser coalesces the two writes and
-     animates anyway. Reading offsetHeight is that reflow. */
+  /* Which way the panel is currently set to move, so the transition is only
+     written when it actually changes. */
+  var guideAnim = null;
+
+  /* Moving the panel without a transition means turning the transition off,
+     and turning it off in the same breath as the move means the browser
+     coalesces the two and animates anyway. A forced reflow between them
+     settles it — and that reflow used to run on every single cursor move,
+     where the profiler found it taking 45% of a held key's time. It is only
+     needed when the transition is being switched, so switch it and leave it:
+     between two non-animated moves there is nothing to suppress. */
   function slideGuide(host, px, animate) {
-    if (animate) { host.style.transform = 'translateY(' + px + 'px)'; return; }
-    host.style.transition = 'none';
+    var want = !!animate;
+    if (want !== guideAnim) {
+      host.style.transition = want ? '' : 'none';
+      guideAnim = want;
+      /* Committed on its own, so the move below is not folded back into it. */
+      if (!want) { /* jshint expr:true */ host.offsetHeight; }
+    }
     host.style.transform = 'translateY(' + px + 'px)';
-    /* jshint expr:true */
-    host.offsetHeight;
-    host.style.transition = '';
   }
 
   /* Keep the cursor row in the middle of the five on screen, clamped at both
@@ -1024,7 +1164,7 @@
     var host = U.$('epg-list');
     var box = U.$('epg-scroller');
     var thumb = U.$('epg-thumb');
-    var h = box.clientHeight || (PANEL_VIEW * GUIDE_H);
+    var h = guideBoxH || box.clientHeight || (PANEL_VIEW * GUIDE_H);
     var total = guide.length * GUIDE_H;
 
     if (total <= h) {
@@ -1098,7 +1238,7 @@
 
     if (p.e <= now) {
       if (!Catchup.available(profile, c, p, now)) {
-        U.toast(T('No catch-up for this programme'));
+        U.toast(T('No catch-up for this program'));
         return;
       }
       leaveGuide();
@@ -1361,13 +1501,20 @@
     return rest ? T('{d}d {h}h', { d: d, h: rest }) : T('{d}d', { d: d });
   }
 
-  function play(c) {
+  /* `autoRetry` marks the one caller that is the automatic retry itself.
+     Everything else is somebody asking, and asking starts the budget over. */
+  function play(c, autoRetry) {
     if (!c) return;
     /* The backstop, so nothing can start a locked channel by a path that
        forgot to ask. Callers with more to do afterwards use withPin, and then
        this is already satisfied by the time it gets here. */
-    if (needsPin(c)) { withPin(c, function () { play(c); }); return; }
-    if (playingKey !== c.key) cancelReconnect();
+    if (needsPin(c)) { withPin(c, function () { play(c, autoRetry); }); return; }
+    /* Not "if the channel changed", which is what this used to say. A stream
+       that had failed its three times left the count at three, and the next
+       failure on that channel — including the one right after somebody pressed
+       "back to live" — went straight to "unavailable" with no retry left. The
+       only way back was to switch channels, which reset the count in passing. */
+    if (!autoRetry) cancelReconnect();
     playingKey = c.key;
     playingCh = c;
     playingProg = null;
@@ -1384,8 +1531,9 @@
   }
 
   /* Replay something that already aired, if the provider kept a recording. */
-  function playCatchup(c, prog) {
-    if (needsPin(c)) { withPin(c, function () { playCatchup(c, prog); }); return; }
+  function playCatchup(c, prog, autoRetry) {
+    if (needsPin(c)) { withPin(c, function () { playCatchup(c, prog, autoRetry); }); return; }
+    if (!autoRetry) cancelReconnect();
     var url = Catchup.url(profile, c, prog);
     if (!url) {
       U.toast(Catchup.supported(profile, c)
@@ -1414,6 +1562,8 @@
     if (ms >= now - LIVE_EDGE) { play(c); repaintAll(); return; }
     var url = Catchup.urlAt(profile, c, ms, ms + 4 * 3600000, now);
     if (!url) { U.toast(T(NO_CATCHUP)); return; }
+    /* Somebody chose this moment, so the retry budget starts over with it. */
+    cancelReconnect();
     playingKey = c.key;
     playingCh = c;
     playingProg = progAt(c, ms);
@@ -1432,11 +1582,29 @@
   /* A recording is moved through; a live channel is restarted from a moment.
      Which one this is comes from the media itself, not from which list the
      channel was in: a film has a duration and a live stream does not. */
+  /* The media seek says where it landed in a toast rather than in the
+     catch-up scrubber, so the legend has to be told about this one
+     separately — the sibling rule in the stylesheet only sees the
+     scrubber. Held for as long as the toast is, and pushed back on every
+     press so holding the key down does not flicker it. */
+  var mediaSeekTimer = null;
+  var MEDIA_SEEK_SHOWN = 2600;   // U.toast's own default
+
+  function markMediaSeek() {
+    U.$('osd').classList.add('seeking');
+    if (mediaSeekTimer) clearTimeout(mediaSeekTimer);
+    mediaSeekTimer = setTimeout(function () {
+      mediaSeekTimer = null;
+      U.$('osd').classList.remove('seeking');
+    }, MEDIA_SEEK_SHOWN);
+  }
+
   function seekMedia(deltaMs) {
     if (!Player.seekable()) return false;
     var to = Player.seekBy(deltaMs);
     U.toast(U.hms(to) + '  /  ' + U.hms(Player.duration()));
     showOsd();
+    markMediaSeek();
     return true;
   }
 
@@ -1454,8 +1622,16 @@
     /* Forward from the live edge is forward into nothing: opening the scrubber
        there only to land back where it started reads as the app ignoring the
        key. Show the bar instead, which is what someone pressing a key on a
-       live channel is actually after. */
-    if (deltaMs > 0 && !seekTimer && now - from < LIVE_EDGE) { showOsd(); return; }
+       live channel is actually after.
+
+       The same holds with the scrubber already open and wound all the way
+       forward. The knob is against the right-hand stop, so the press is
+       dropped — and the commit already pending is left running, which is
+       what puts the picture back on the live edge. */
+    if (deltaMs > 0 && now - from < LIVE_EDGE) {
+      if (!seekTimer) showOsd();
+      return;
+    }
     var lo = Catchup.earliest(profile, c, now) + 60000;
     seekTo = U.clamp(from + deltaMs, lo, now);
     paintSeek();
@@ -1512,18 +1688,48 @@
     U.$('osd').classList.remove('seeking');
   }
 
+  /* Different channels failing one after another is not several channels'
+     problem. Distinct keys, because three failed attempts at one dead channel
+     says nothing about the rest of the playlist, and a window, because two
+     failures an hour apart are not a pattern. Cleared the moment anything
+     plays — one channel starting is proof the provider is answering. */
+  var recentFails = [], lastFailAt = 0;
+  var PROVIDER_FAILS = 3, PROVIDER_WINDOW = 120000;
+
+  /* Only the failures that mean nobody answered. A stream the device cannot
+     decode, or a format it does not know, says nothing at all about the
+     provider — it answered, and what it sent is the problem. Counting those
+     would tell somebody with a browser that cannot play raw .ts to go and
+     check their subscription, which is the opposite of helpful. */
+  var PROVIDER_REASONS = [
+    'Cannot reach the stream server',
+    'Stream not found (channel may be offline)',
+    'Network error',
+    'Could not open this stream'
+  ];
+
+  function noteFailure(c, why) {
+    if (PROVIDER_REASONS.indexOf(String(why || '')) === -1) return false;
+    var now = Date.now();
+    if (now - lastFailAt > PROVIDER_WINDOW) recentFails = [];
+    lastFailAt = now;
+    if (c && recentFails.indexOf(c.key) === -1) recentFails.push(c.key);
+    return recentFails.length >= PROVIDER_FAILS;
+  }
+
   function cancelReconnect() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     reconnects = 0;
   }
 
-  /* Retry whatever was playing, from wherever it was. */
+  /* Retry whatever was playing, from wherever it was. The only caller that
+     keeps the count: this is the chain that is meant to give up after three. */
   function reconnectNow() {
     reconnectTimer = null;
     var c = playingCh;
     if (!c) return;
-    if (playingProg) playCatchup(c, playingProg);
-    else play(c);
+    if (playingProg) playCatchup(c, playingProg, true);
+    else play(c, true);
   }
 
   function stopPlayback() {
@@ -1560,10 +1766,11 @@
       if (playingKey !== c.key || Player.isPlaying()) return;
       U.$('preview-spinner').classList.add('hidden');
       U.$('stage').classList.remove('preview-on');
+      /* Both of these were built by concatenation and so were English in
+         every language. */
       U.$('preview-hint').textContent = U.isTV
-        ? (c.name + ' will not start — the stream may be offline')
-        : (c.name + ' will not start here — it may be offline, or interlaced, ' +
-           'which this browser cannot decode but the TV can');
+        ? T('{name} will not start — the stream may be offline', { name: c.name })
+        : T('{name} will not start here — it may be offline, or interlaced, which this browser cannot decode but the TV can', { name: c.name });
       if (fullscreen) U.toast(T('Could not start {name}', { name: c.name }));
     }, STALL_MS);
   }
@@ -1601,7 +1808,22 @@
     if (playingKey) Player.setMode('preview');
     // If the stream died while fullscreen, show why rather than a black panel.
     if (!Player.isPlaying()) U.$('stage').classList.remove('preview-on');
+    /* Come back to the channel being watched, not to wherever the list was
+       left. Somebody browses down to channel 400, opens 12 full screen, and
+       presses back: the list they want is the one with 12 in it. The cursor
+       was staying at 400, so the guide panel and the preview underneath were
+       describing a channel nobody was watching. */
+    backToPlaying();
     repaintAll();
+  }
+
+  /* Put the cursor on whatever is playing, if it is in the list at all — a
+     channel can be playing that the current group does not contain. */
+  function backToPlaying() {
+    if (!playingKey) return;
+    for (var i = 0; i < view.length; i++) {
+      if (view[i].key === playingKey) { chIdx = i; return; }
+    }
   }
 
   /* Fullscreen up/down zaps, which does change the channel. */
@@ -1689,6 +1911,9 @@
     var c = playingCh || view[chIdx];
     if (!c) return;
     paintOsdText(c);
+    /* Up and down only change channel when the setting says they do, and
+       a legend that says otherwise is worse than no legend. */
+    U.$('osd-k-chan').classList.toggle('hidden', !Store.settings().arrowZap);
     startTsClock();
     U.$('osd').classList.remove('hidden');
     if (osdTimer) clearTimeout(osdTimer);
@@ -1704,6 +1929,8 @@
 
   function hideOsd() {
     setLiveFocus(false);
+    if (mediaSeekTimer) { clearTimeout(mediaSeekTimer); mediaSeekTimer = null; }
+    U.$('osd').classList.remove('seeking');
     if (osdTimer) { clearTimeout(osdTimer); osdTimer = null; }
     stopTsClock();
     U.$('osd').classList.add('hidden');
@@ -1741,6 +1968,153 @@
 
   /* ---------------- search ---------------- */
 
+
+  /* ---------------- search ----------------
+
+     Two kinds of answer to one question. A channel matches on its name; a
+     programme matches on its title, across every channel the guide covers,
+     and carries the channel and the time with it because "Match of the Day"
+     on its own is not an answer.
+
+     The guide is tens of thousands of programmes, so each one's search key is
+     worked out once and kept on the programme itself. Without that, every
+     keystroke would re-slug the whole guide. */
+  var findRows = [], findIdx = 0, findTop = 0;
+  var FIND_ROW = 96, FIND_VIS = 6, FIND_MAX = 60;
+
+  function findKeyOf(p) {
+    if (p._sk === undefined) p._sk = U.searchKey(p.t || '');
+    return p._sk;
+  }
+
+  function openFind() {
+    pane = 'find';
+    findRows = []; findIdx = 0; findTop = 0;
+    var el = U.$('find-input');
+    el.value = '';
+    U.$('find').classList.remove('hidden');
+    findPaint();
+    el.classList.add('focused');
+    el.focus();
+    /* The shell opens the keyboard; the WebView will not do it on its own and
+       leaves it up if it does. */
+    if (U.isAndroid) { try { w.AquaPlayNative.setEditing(true); } catch (e) {} }
+  }
+
+  function closeFind() {
+    var el = U.$('find-input');
+    el.classList.remove('focused');
+    el.blur();
+    if (U.isAndroid) { try { w.AquaPlayNative.setEditing(false); } catch (e) {} }
+    U.$('find').classList.add('hidden');
+    pane = 'channels';
+    repaintAll();
+  }
+
+  var onFindInput = U.debounce(function () { findBuild(); }, 160);
+
+  function findBuild() {
+    var q = U.searchKey((U.$('find-input').value || '').trim());
+    findRows = []; findIdx = 0; findTop = 0;
+    if (!q) { findPaint(); return; }
+
+    var all = C.channels() || [];
+    var i, j;
+    /* Channels first: somebody typing "BBC" wants the channel, not every
+       programme with it in the title. */
+    for (i = 0; i < all.length && findRows.length < FIND_MAX; i++) {
+      if (all[i].skey.indexOf(q) > -1) findRows.push({ kind: 'ch', ch: all[i] });
+    }
+    if (EPG.hasData()) {
+      for (i = 0; i < all.length && findRows.length < FIND_MAX; i++) {
+        var list = EPG.list(all[i]);
+        for (j = 0; j < list.length && findRows.length < FIND_MAX; j++) {
+          if (findKeyOf(list[j]).indexOf(q) > -1) {
+            findRows.push({ kind: 'prog', ch: all[i], p: list[j] });
+          }
+        }
+      }
+    }
+    findPaint();
+  }
+
+  function findPaint() {
+    var host = U.$('find-list');
+    var html = '';
+    for (var i = 0; i < findRows.length; i++) {
+      var r = findRows[i];
+      var logo = r.ch.logo ? 'background-image:url("' + U.esc(r.ch.logo) + '")' : '';
+      var title, sub;
+      if (r.kind === 'ch') {
+        title = r.ch.name;
+        sub = T('Channel') + '  ·  ' + (numOf(r.ch) || '') +
+              (r.ch.group ? '  ·  ' + r.ch.group : '');
+      } else {
+        title = r.p.t;
+        sub = r.ch.name + '  ·  ' + dayLabel(r.p.s) + ' ' +
+              U.hhmm(new Date(r.p.s)) + '–' + U.hhmm(new Date(r.p.e));
+      }
+      html += '<div class="fd-row' + (i === findIdx ? ' focused' : '') + '">' +
+                '<span class="fd-logo" style="' + logo + '"></span>' +
+                '<span class="fd-text"><span class="fd-title">' + U.esc(title) + '</span>' +
+                '<span class="fd-sub">' + U.esc(sub) + '</span></span></div>';
+    }
+    host.innerHTML = html;
+
+    var typed = (U.$('find-input').value || '').trim().length > 0;
+    var empty = U.$('find-empty');
+    empty.textContent = typed ? T('Nothing found') : T('Type to search');
+    empty.classList.toggle('hidden', findRows.length > 0);
+
+    /* The window keeps two rows between the cursor and its edges, the same
+       rule the channel list and the settings list use. */
+    var maxTop = Math.max(0, findRows.length - FIND_VIS);
+    if (findIdx - 2 < findTop) findTop = Math.max(0, findIdx - 2);
+    if (findIdx + 2 >= findTop + FIND_VIS) {
+      findTop = Math.min(maxTop, findIdx + 2 - FIND_VIS + 1);
+    }
+    findTop = Math.min(Math.max(0, findTop), maxTop);
+    host.style.transform = 'translateY(-' + (findTop * FIND_ROW) + 'px)';
+    U.vtrack(U.$('find-scroll'), U.$('find-thumb'),
+             findRows.length * FIND_ROW, FIND_VIS * FIND_ROW, findTop * FIND_ROW);
+  }
+
+  function findOpen(r) {
+    if (!r) return;
+    closeFind();
+    var idx = indexOfKey(r.ch.key);
+    if (idx === -1) { U.toast(T('{name} is unavailable', { name: r.ch.name })); return; }
+    chIdx = idx;
+    if (r.kind === 'ch') { play(r.ch); repaintAll(); return; }
+    /* A programme still to come cannot be played, so the honest thing is to
+       put the viewer on the channel and say when it starts. */
+    var now = Date.now();
+    if (r.p.s > now) {
+      repaintAll();
+      U.toast(r.p.t + '  ·  ' + dayLabel(r.p.s) + ' ' + U.hhmm(new Date(r.p.s)));
+      return;
+    }
+    if (r.p.e <= now && Catchup.available(profile, r.ch, r.p, now)) {
+      playCatchup(r.ch, r.p);
+    } else {
+      play(r.ch);
+    }
+    repaintAll();
+  }
+
+  function findKey(a) {
+    if (a === 'back' || a === 'exit') { closeFind(); return; }
+    if (a === 'up') {
+      if (findIdx > 0) { findIdx--; findPaint(); }
+      return;
+    }
+    if (a === 'down') {
+      if (findIdx < findRows.length - 1) { findIdx++; findPaint(); }
+      return;
+    }
+    if (a === 'ok') { findOpen(findRows[findIdx]); return; }
+  }
+
   function enterSearch() {
     pane = 'search';
     /* The box is out of the way until it is used, and an input that is
@@ -1752,6 +2126,10 @@
     el.focus();
     repaintFocusOnly();
   }
+
+  /* Everything that used to open the box at the top of the list opens the
+     window instead. */
+  function enterFind() { openFind(); }
 
   function exitSearch() {
     var el = U.$('search-input');
@@ -1767,6 +2145,16 @@
   }, 260);
 
   C.bindSearch = function () {
+    U.$('find-input').addEventListener('input', onFindInput, false);
+    U.$('find-list').addEventListener('click', function (ev) {
+      var node = ev.target;
+      while (node && node !== this && !node.classList.contains('fd-row')) node = node.parentNode;
+      if (!node || node === this) return;
+      var kids = this.children;
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i] === node) { findIdx = i; findOpen(findRows[i]); return; }
+      }
+    }, false);
     U.$('search-input').addEventListener('input', onSearchInput, false);
   };
 
@@ -1834,6 +2222,7 @@
   C.onPlayerEvent = function (type, arg) {
     if (type === 'playing') {
       clearStallWatch();
+      recentFails = [];           // something played, so the provider is there
       cancelReconnect();          // it worked, so start the count over
       onBufferingChanged(false);
       U.$('preview-spinner').classList.add('hidden');
@@ -1875,13 +2264,26 @@
         return;
       }
 
-      // Set the hint either way, so leaving fullscreen does not drop back to a
-      // black panel with no explanation. Say *why* when we know: "unavailable"
-      // is misleading for a stream the browser simply refuses to decode.
-      U.$('preview-hint').textContent = Player.isDecodeError(arg)
-        ? T(arg)
-        : (c ? T('{name} is unavailable', { name: c.name }) : T('Unavailable'));
-      if (fullscreen) U.toast(arg || T('Playback failed'));
+      /* Set the hint either way, so leaving fullscreen does not drop back to
+         a black panel with no explanation. Say *why* whenever the player told
+         us — not only for a decode failure, which is where this started:
+         "unavailable" is a worse answer than "cannot reach the stream server"
+         every time, and naming the channel is only better when there is
+         nothing else to say.
+
+         This is where the player's vocabulary is translated. It travels in
+         English because that string is also the identity of the fault —
+         isDecodeError reads it — so it is looked up here, once, on its way to
+         the screen. */
+      var why = arg ? T(arg) : '';
+      /* And if this is the third different channel to fail in as many
+         minutes, the channel is not the story. */
+      if (noteFailure(c, arg)) {
+        why = T('Several channels would not start — this is usually the provider, not the app');
+      }
+      U.$('preview-hint').textContent = why ||
+        (c ? T('{name} is unavailable', { name: c.name }) : T('Unavailable'));
+      if (fullscreen) U.toast(why || T('Playback failed'));
       else U.$('stage').classList.remove('preview-on');
     }
   };
@@ -1921,6 +2323,8 @@
       watchFullscreen();
       return;
     }
+
+    if (pane === 'find') { findKey(a); return; }
 
     if (pane === 'search') {
       if (a === 'back' || a === 'up') { exitSearch(); return; }
@@ -1963,18 +2367,19 @@
         case 'chanDown':  zapBy(1); return;
         // Wind back and forth through what the provider still holds.
         case 'left':      scrub(-SEEK_STEP); return;
-        /* On a recording, right is fast-forward — there is something to go
-           forward into. On a live channel there is not, so right is the
-           channel panel instead, the same as it is in the list. */
-        case 'right':
-          if (Player.seekable() || seekTimer) { scrub(SEEK_STEP); return; }
-          openCtx(); return;
+        /* Right is forward and nothing else. It used to be the channel menu
+           unless the player reported a duration, which meant the same key
+           did two unrelated things depending on what a provider said about
+           a stream — and the menu won whenever the viewer wanted the other
+           one. There is no channel menu in fullscreen any more. */
+        case 'right':      scrub(SEEK_STEP); return;
         case 'rew':       scrub(-SEEK_JUMP); return;
         case 'ff':        scrub(SEEK_JUMP); return;
         case 'ok':        if (seekTimer) { commitSeek(); return; } toggleOsd(); return;
         case 'play':
         case 'playPause': if (seekTimer) { commitSeek(); return; } showOsd(); return;
-        case 'info':      showOsd(); return;
+        case 'info':
+        case 'blue':      showOsd(); return;
         case 'red':       toggleFav(); return;
         case 'yellow':    App.openSettings(); return;
         case 'digit':     pushDigit(e.digit); return;
@@ -2005,7 +2410,6 @@
         case 'back':   pane = 'groups'; paintSections(); repaintAll(); return;
         case 'up':     return;
         case 'yellow': App.openSettings(); return;
-        case 'blue':   App.refreshPlaylist(); return;
         case 'exit':   U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); }); return;
         default: return;
       }
@@ -2103,8 +2507,11 @@
 
       case 'stop':   if (playingKey) { stopPlayback(); repaintAll(); } return;
       case 'red':    toggleFav(); return;
-      case 'green':  enterSearch(); return;
-      case 'blue':   App.refreshPlaylist(); return;
+      case 'green':  enterFind(); return;
+      /* Blue, not INFO. On a real remote INFO belongs to the television: it
+         opens the set's own banner and takes the viewer out of the app
+         entirely. Reloading the playlist keeps its place in the drawer. */
+      case 'blue':   enterGuide(); return;
       // INFO focuses the guide beside the player; the Guide button opens the
       // full catch-up browser, which is what it is for.
       case 'guide':  openReplay(); return;
@@ -2145,51 +2552,52 @@
     var playing = (c.key === playingKey);
     var locked = Store.isLocked(profile.id, c.key);
 
+    /* This menu belongs to the browse screen and is only ever opened from
+       it. Fullscreen had its own shape of it on right, and right is the key
+       that winds the picture forward — one key doing both, chosen by whether
+       a provider reported a duration, and the menu won whenever the viewer
+       wanted the picture to move. The one thing it offered that fullscreen
+       could not otherwise reach, "Back to live", is a button on the info bar. */
     CTX = [];
-    if (fullscreen) {
-      if (isBehind()) CTX.push({ icon: '🔴', label: T('Back to live'), run: backToLive });
-      CTX.push({ icon: '⇲', label: T('Leave full screen'),
-                 run: function () { closeCtx(); leaveFullscreen(); } });
-    } else {
-      CTX.push({
-        icon: '▶',
-        label: playing ? T('Go full screen') : T('Watch full screen'),
-        run: function () {
-          closeCtx();
-          if (playing) { enterFullscreen(); return; }
-          withPin(c, function () { play(c); repaintAll(); enterFullscreen(); });
-        }
-      });
-      if (playing && isBehind()) CTX.push({ icon: '🔴', label: T('Back to live'), run: backToLive });
-    }
+    CTX.push({
+      icon: 'play',
+      label: playing ? T('Go full screen') : T('Watch full screen'),
+      run: function () {
+        closeCtx();
+        if (playing) { enterFullscreen(); return; }
+        withPin(c, function () { play(c); repaintAll(); enterFullscreen(); });
+      }
+    });
+    if (playing && isBehind()) CTX.push({ icon: 'live', label: T('Back to live'), run: backToLive });
     /* The way into the guide panel that does not need a key to be known. */
-    if (!fullscreen) {
-      CTX.push({ icon: '🗓', label: T('Schedule'),
-                 run: function () { closeCtx(); enterGuide(); } });
-    }
-    CTX.push({ icon: '📺', label: T('Catch-up guide'),
+    CTX.push({ icon: 'calendar', label: T('Schedule'),
+               run: function () { closeCtx(); enterGuide(); } });
+    CTX.push({ icon: 'tv', label: T('Catch-up guide'),
                run: function () { closeCtx(); openReplay(); } });
     CTX.push({
-      icon: '⭐',
-      label: Store.isFav(profile.id, c.key) ? T('Remove from favourites') : T('Add to favourites'),
+      icon: 'star',
+      label: Store.isFav(profile.id, c.key) ? T('Remove from favorites') : T('Add to favorites'),
       run: function () { closeCtx(); toggleFav(); }
     });
-    CTX.push({ icon: '🔢', label: T('Change channel number'),
+    CTX.push({ icon: 'numbers', label: T('Change channel number'),
                run: function () { closeCtx(); editNumber(c); } });
     /* Parental control, one channel at a time. The adult filter is a guess at
        a name; this is the viewer pointing at a channel. */
     CTX.push({
-      icon: locked ? '🔓' : '🔒',
+      icon: locked ? 'unlock' : 'lock',
       label: locked ? T('Unlock this channel') : T('Lock with PIN'),
       run: function () { closeCtx(); toggleLock(c); }
     });
 
     ctxIdx = 0;
     pane = 'ctx';
+    var cmLogo = U.$('cm-logo');
+    cmLogo.style.backgroundImage = c.logo ? 'url("' + c.logo + '")' : '';
+    cmLogo.className = 'cm-logo' + (c.logo ? '' : ' blank');
     U.$('cm-title').textContent = c.name;
     U.$('cm-sub').textContent = (numOf(c) ? 'Channel ' + numOf(c) : '') +
       (c.group ? (numOf(c) ? '   ·   ' : '') + c.group : '');
-    paintCtx();
+    buildCtx();
     U.$('ctxmenu').classList.remove('hidden');
     repaintAll();
   }
@@ -2200,16 +2608,29 @@
   function rowsHtml(items, sel, cls) {
     var html = '';
     for (var i = 0; i < items.length; i++) {
+      /* The icon is a class, not a character: these are drawn from the
+         row's own colour rather than borrowed from the platform's emoji
+         font, which has its own ideas about style and sometimes none at all
+         about the glyph. */
       html += '<div class="' + cls + (i === sel ? ' focused' : '') + '">' +
-              '<span class="mi-ico">' + U.esc(items[i].icon || '') + '</span>' +
+              '<i class="mi-ico ico ico-' + (items[i].icon || 'about') + '"></i>' +
               '<span class="mi-label">' + U.esc(items[i].label) + '</span></div>';
     }
     return html;
   }
 
-  function paintCtx() {
-    U.$('cm-list').innerHTML = rowsHtml(CTX, ctxIdx, 'cm-row');
+  /* Move the mark, do not rebuild the list. Rewriting every row to move a
+     cursor one place meant re-resolving each row's masked icon on every
+     press, which is what made the drawers heavy to scroll. */
+  function markRow(hostId, sel) {
+    var kids = U.$(hostId).children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].classList.toggle('focused', i === sel);
+    }
   }
+
+  function buildCtx() { U.$('cm-list').innerHTML = rowsHtml(CTX, ctxIdx, 'cm-row'); }
+  function paintCtx() { markRow('cm-list', ctxIdx); }
 
   function closeCtx() {
     U.$('ctxmenu').classList.add('hidden');
@@ -2222,30 +2643,72 @@
 
   var MENU = [], menuIdx = 0;
 
-  /* Favourites and Recently watched used to be here. They are the first two
+  /* Favorites and Recently watched used to be here. They are the first two
      rows of the groups rail, and this drawer opens by going left past that
      rail — so they offered to send somebody back to the thing they had just
      walked through. What is left is only what is nowhere else. */
   function openMenu() {
     MENU = [
-      { icon: '🔍', label: T('Search'),           run: function () { closeMenu(); enterSearch(); } },
-      { icon: '🗓', label: T('TV catalogue'),     run: function () { closeMenu(); CatalogView.open(profile); } },
-      { icon: '📺', label: T('Catch-up'),         run: function () { closeMenu(); openReplay(); } },
-      { icon: '⚙️', label: T('Settings'),         run: function () { closeMenu(); App.openSettings(); } },
-      { icon: '🔄', label: T('Reload playlist'),  run: function () { closeMenu(); App.refreshPlaylist(); } }
+      { icon: 'search',   label: T('Search'),          run: function () { closeMenu(); enterFind(); } },
+      { icon: 'calendar', label: T('TV catalog'),    run: function () { closeMenu(); CatalogView.open(profile); } },
+      { icon: 'playlist', label: T('Playlists'),       run: function () { closeMenu(); pickPlaylist(); } },
+      { icon: 'replay',   label: T('Catch-up'),        run: function () { closeMenu(); openReplay(); } },
+      { icon: 'sliders',  label: T('Settings'),        run: function () { closeMenu(); App.openSettings(); } },
+      { icon: 'reload',   label: T('Reload playlist'), run: function () { closeMenu(); App.refreshPlaylist(); } },
+      { icon: 'about',    label: T('About'),           run: function () { closeMenu(); showAbout(); } }
     ];
     if (!U.isTV) {
-      MENU.push({ icon: '⌨️', label: T('Keyboard keys'), run: function () { closeMenu(); U.help(); } });
+      MENU.push({ icon: 'keyboard', label: T('Keyboard keys'), run: function () { closeMenu(); U.help(); } });
     }
-    MENU.push({ icon: '🚪', label: T('Exit'), run: function () {
+    MENU.push({ icon: 'exit', label: T('Exit'), run: function () {
       closeMenu();
       U.confirm(T('Exit AquaPlay?'), function (yes) { if (yes) Keys.exitApp(); });
     } });
 
     menuIdx = 0;
     pane = 'menu';
+    buildMenu();
     paintMenu();
     U.$('sidemenu').classList.remove('hidden');
+  }
+
+  /* Which playlist, and a way to add another. One list rather than a row
+     per playlist: somebody with six of them should not have a drawer six rows
+     longer than somebody with one. */
+  function pickPlaylist() {
+    var all = Store.profiles() || [];
+    var cur = profile ? profile.id : null;
+    var items = [];
+    for (var i = 0; i < all.length; i++) {
+      items.push({ value: all[i].id, label: all[i].name || T('Playlist') });
+    }
+    /* Below a rule, because adding one is not choosing between them. */
+    items.push({ value: '\u0000add', label: T('Add a new playlist'), apart: true });
+
+    U.pick(T('Playlists'), items, cur, function (id) {
+      if (id === null) return;
+      if (id === '\u0000add') { App.openSetup(true); return; }
+      App.switchProfile(id);
+    });
+  }
+
+  /* What this is, and what it is running on. Everything here is a fact
+     somebody might be asked for over the phone when a channel will not play:
+     which build, which platform, how much of a playlist is loaded. */
+  function showAbout() {
+    var all = C.channels() || [];
+    var lines = [
+      T('Version') + ': ' + (App.version || '—'),
+      T('Running on') + ': ' + (U.isTizen ? T('Tizen') : (U.isAndroid ? T('Android TV') : T('a browser'))),
+      T('Playlist') + ': ' + ((profile && profile.name) || '—') +
+        '  ·  ' + all.length + ' ' + T('channels'),
+      T('Guide') + ': ' + (EPG.hasData() ? T('loaded') : T('not loaded'))
+    ];
+    U.confirm(T('About AquaPlay'), function () {}, {
+      desc: lines.join('\n'),
+      logo: 'img/logo.png',
+      yes: T('Close'), no: ''
+    });
   }
 
   function closeMenu() {
@@ -2254,10 +2717,16 @@
     repaintAll();
   }
 
+  function buildMenu() { U.$('sm-list').innerHTML = rowsHtml(MENU, menuIdx, 'sm-row'); }
+
   function paintMenu() {
-    U.$('sm-list').innerHTML = rowsHtml(MENU, menuIdx, 'sm-row');
-    U.$('sm-foot').textContent = (profile && profile.name ? profile.name + '   ·   ' : '') +
-      all.length + ' channels';
+    markRow('sm-list', menuIdx);
+    /* The playlist and its size at one end, which build this is at the
+       other. Version numbers belong somewhere findable and nowhere prominent,
+       and the drawer's foot is already the quiet corner. */
+    U.$('sm-foot-left').textContent =
+      (profile && profile.name ? profile.name + '   ·   ' : '') + all.length + ' channels';
+    U.$('sm-foot-right').textContent = 'v' + (App.version || '');
   }
 
   function openReplay() {
@@ -2286,7 +2755,7 @@
     var c = view[chIdx];
     if (!c) return;
     var on = Store.toggleFav(profile.id, c.key);
-    U.toast(on ? T('★ Added to favourites') : T('Removed from favourites'));
+    U.toast(on ? T('★ Added to favorites') : T('Removed from favorites'));
     var g = groups[groupIdx];
     if (g && g.kind === 'fav') applyGroup();
     else { chList.invalidate(); repaintAll(); }

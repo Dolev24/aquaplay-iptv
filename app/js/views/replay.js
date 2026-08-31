@@ -118,7 +118,7 @@
         (i === dayIdx ? ' selected' : '') +
         (pane === 'days' && i === dayIdx ? ' focused' : '');
     }
-    ensureVisible(q('rp-days'), dayIdx, DAY_H, q('rp-days').parentNode);
+    ensureVisible(q('rp-days'), dayIdx, DAY_H, q('rp-days').parentNode, 'days', days.length);
   }
 
   function paintProgs() {
@@ -166,13 +166,29 @@
     }
     q('rp-count').textContent = list.length
       ? (progIdx + 1) + ' / ' + list.length + '   ·   ' + n + ' to replay' : '';
-    ensureVisible(q('rp-list'), progIdx, PROG_H, q('rp-scroller'));
+    ensureVisible(q('rp-list'), progIdx, PROG_H, q('rp-scroller'), 'progs', list.length);
   }
 
-  function ensureVisible(host, idx, rowH, box) {
+  /* The window each list keeps, remembered per list. */
+  var tops = {};
+
+  /* The same rule as the channel list: two whole rows between the cursor and
+     either edge, and the window only moves when the cursor would leave it.
+
+     This used to compute the offset from scratch on every paint, which put
+     the focused row hard against the bottom of the box and moved the list on
+     every single press. Next to a channel list that holds its position and
+     keeps two rows of air, it read as a different app. */
+  function ensureVisible(host, idx, rowH, box, key, count) {
     var h = (box && box.clientHeight) || 800;
-    var top = Math.max(0, (idx + 1) * rowH - h);
-    if (idx * rowH < top) top = idx * rowH;
+    var limit = Math.max(0, count * rowH - h);
+    var margin = rowH * 2;
+    var y = idx * rowH;
+    var top = tops[key] || 0;
+    if (y - margin < top) top = Math.max(0, y - margin);
+    if (y + rowH + margin > top + h) top = Math.min(limit, y + rowH + margin - h);
+    top = Math.max(0, Math.min(top, limit));
+    tops[key] = top;
     host.style.transform = 'translateY(' + (-top) + 'px)';
   }
 

@@ -11,12 +11,17 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 
 /**
@@ -65,7 +70,14 @@ class PlayerBridge(
     @Volatile private var snapPositionMs = 0L
     @Volatile private var snapDurationMs = 0L
     @Volatile private var snapVideoSize = ""
+    @Volatile private var snapTracks = ""
+
+    /** Built with the player, because it shares its data source factory. */
+    private var hlsSource: HlsMediaSource.Factory? = null
     @Volatile private var snapError = ""
+    /** Whether a frame has reached the screen since the last play(). A stream
+     *  that decodes nothing looks exactly like one that is still buffering. */
+    @Volatile private var sawFrame = false
     @Volatile private var snapRect = "-"
     @Volatile private var snapScreen = "-"
 
@@ -76,7 +88,16 @@ class PlayerBridge(
         override fun run() {
             val p = player ?: return
             snapPositionMs = p.currentPosition.coerceAtLeast(0L)
-            snapDurationMs = if (p.duration == C.TIME_UNSET) 0L else p.duration.coerceAtLeast(0L)
+            /* A live stream HAS a duration as far as ExoPlayer is concerned —
+               the sliding window, about a minute of it — and reporting that
+               made every live channel look like a short recording to
+               player.js, which turns "has a duration" into "can be sought".
+               The arrows then shuffled about inside that minute instead of
+               opening the catch-up scrubber. TIME_UNSET means "not known
+               yet", which is a different question from "is this live". */
+            snapDurationMs =
+                if (p.isCurrentMediaItemLive || p.duration == C.TIME_UNSET) 0L
+                else p.duration.coerceAtLeast(0L)
             if (snapPlaying) emit("time", snapPositionMs.toString())
             main.postDelayed(this, 500)
         }
@@ -103,13 +124,25 @@ class PlayerBridge(
             val p = ensurePlayer()
             snapError = ""
             snapVideoSize = ""
+            snapTracks = ""
             setState("buffering")
             try {
-                p.setMediaItem(MediaItem.fromUri(url))
+                /* HLS has to be built by hand to carry the extractor flags
+                   above; nothing else does. */
+                val item = MediaItem.fromUri(url)
+                val hls = hlsSource
+                if (hls != null && url.contains(".m3u8", ignoreCase = true)) {
+                    p.setMediaSource(hls.createMediaSource(item))
+                } else {
+                    p.setMediaItem(item)
+                }
                 p.prepare()
                 p.playWhenReady = true
+                sawFrame = false
                 main.removeCallbacks(ticker)
                 main.post(ticker)
+                main.removeCallbacks(noPicture)
+                main.postDelayed(noPicture, NO_PICTURE_MS)
             } catch (t: Throwable) {
                 fail("Could not open this stream", t)
             }
@@ -120,6 +153,7 @@ class PlayerBridge(
     fun stop() {
         main.post {
             main.removeCallbacks(ticker)
+            main.removeCallbacks(noPicture)
             player?.let {
                 it.stop()
                 it.clearMediaItems()
@@ -146,12 +180,26 @@ class PlayerBridge(
      * the whole reason the app computes it rather than asking the platform to.
      */
     @JavascriptInterface
-    fun setRect(x: Int, y: Int, w: Int, h: Int) {
-        if (w <= 0 || h <= 0) return
+    fun setRect(x: Int, y: Int, w: Int, h: Int, vw: Int, vh: Int) {
+        if (w <= 0 || h <= 0 || vw <= 0 || vh <= 0) return
         main.post {
-            val lp = FrameLayout.LayoutParams(w, h)
-            lp.leftMargin = x
-            lp.topMargin = y
+            /* The page's pixels are not this view's pixels and no constant says
+               what the difference is — devicePixelRatio reports the density
+               while the WebView quietly folds a page scale in on top of it. So
+               the page says how big it thinks it is and the view knows how big
+               it really is, and the ratio between those two is the answer
+               whatever either of them is called. */
+            val parent = surface.parent as? android.view.View
+            val realW = parent?.width ?: 0
+            val realH = parent?.height ?: 0
+            val sx = if (realW > 0) realW.toDouble() / vw else 1.0
+            val sy = if (realH > 0) realH.toDouble() / vh else 1.0
+
+            val lp = FrameLayout.LayoutParams(
+                Math.round(w * sx).toInt(), Math.round(h * sy).toInt()
+            )
+            lp.leftMargin = Math.round(x * sx).toInt()
+            lp.topMargin = Math.round(y * sy).toInt()
             surface.layoutParams = lp
             surface.requestLayout()
             /* What was asked for, and what the screen is. A picture in the
@@ -159,9 +207,10 @@ class PlayerBridge(
                it took somebody with a television to notice — so it is written
                down now rather than inferred. */
             val dm = activity.resources.displayMetrics
-            snapRect = "${x},${y} ${w}x${h}"
-            snapScreen = "${dm.widthPixels}x${dm.heightPixels} @${dm.density}"
-            Log.i(MainActivity.TAG, "setRect $snapRect  screen $snapScreen")
+            snapRect = "${lp.leftMargin},${lp.topMargin} ${lp.width}x${lp.height}"
+            snapScreen = "page ${vw}x${vh} view ${realW}x${realH} " +
+                "screen ${dm.widthPixels}x${dm.heightPixels} @${dm.density}"
+            Log.i(MainActivity.TAG, "setRect $snapRect  ($snapScreen)")
         }
     }
 
@@ -201,6 +250,12 @@ class PlayerBridge(
     @JavascriptInterface
     fun videoSize(): String = snapVideoSize
 
+    /** What the stream turned out to contain, and what this device makes of
+     *  it: one line per track, marked UNSUPPORTED where nothing will decode
+     *  it. Empty until a stream has been opened. */
+    @JavascriptInterface
+    fun trackInfo(): String = snapTracks
+
     @JavascriptInterface
     fun state(): String = snapState
 
@@ -210,6 +265,19 @@ class PlayerBridge(
     @JavascriptInterface
     fun exitApp() {
         (activity as? MainActivity)?.exitApp()
+    }
+
+    /**
+     * The page has put the cursor in a text field, or taken it out again.
+     *
+     * Left to itself the WebView opens the keyboard when an input takes focus
+     * and leaves it up afterwards, so the next OK — on the Connect button, say
+     * — goes to the keyboard rather than to the page. The page knows which of
+     * those two states it is in and nothing else does, so it says.
+     */
+    @JavascriptInterface
+    fun setEditing(on: Boolean) {
+        (activity as? MainActivity)?.setEditing(on)
     }
 
     /* =====================================================================
@@ -223,8 +291,31 @@ class PlayerBridge(
 
     fun release() = main.post {
         main.removeCallbacks(ticker)
+        main.removeCallbacks(noPicture)
         player?.release()
         player = null
+    }
+
+    /**
+     * Nothing has reached the screen. Give up and say why.
+     *
+     * Twenty seconds is far longer than any buffer this app asks for, so
+     * reaching it means the picture is not coming. What it deliberately does
+     * not do is say why. The first time this fired, the cause looked exactly
+     * like a software decoder refusing interlaced video — and was nothing of
+     * the kind: the reader was waiting for an IDR frame that the broadcaster
+     * never sends, which is what FLAG_ALLOW_NON_IDR_KEYFRAMES now settles. A
+     * message that names a cause it has not established sends the next person
+     * looking in the wrong place, and cost this one a version.
+     */
+    private val noPicture = Runnable {
+        if (sawFrame) return@Runnable
+        val p = player ?: return@Runnable
+        if (p.playbackState == Player.STATE_IDLE || p.playbackState == Player.STATE_ENDED) {
+            return@Runnable
+        }
+        Log.w(MainActivity.TAG, "no picture after ${NO_PICTURE_MS}ms — giving up")
+        fail("This channel is sending sound but no picture", null)
     }
 
     /* =====================================================================
@@ -260,6 +351,22 @@ class PlayerBridge(
             .setReadTimeoutMs(25_000)
             .setAllowCrossProtocolRedirects(true)
 
+        /* Broadcast H.264 very often carries no IDR frames at all: the
+           encoder refreshes the picture gradually instead, which is legal and
+           which the reader will otherwise wait for for ever. The symptom is
+           not an error — the video track is found, selected and reported
+           supported, the audio plays, and no decoder is ever created. This
+           says to begin at the first recovery point instead. */
+        val hlsExtractors = DefaultHlsExtractorFactory(
+            DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES,
+            /* exposeCea608WhenMissingDeclarations = */ true
+        )
+        hlsSource = HlsMediaSource.Factory(http).setExtractorFactory(hlsExtractors)
+
+        /* The same stream also arrives as a bare .ts from some providers. */
+        val tsExtractors = DefaultExtractorsFactory()
+            .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
+
         val tracks = DefaultTrackSelector(activity).apply {
             /* Start on the lowest rendition and let it climb: a channel that
                is soft for two seconds beats a channel that takes five to
@@ -267,10 +374,17 @@ class PlayerBridge(
             parameters = buildUponParameters().setForceLowestBitrate(true).build()
         }
 
-        val built = ExoPlayer.Builder(activity)
+        /* If the decoder the platform picks first cannot start, try the next
+           one rather than giving up. It rescues the decoders that fail
+           honestly; it does nothing for a stream that never reaches a decoder
+           at all, which is what the missing-IDR channels were doing. */
+        val renderers = androidx.media3.exoplayer.DefaultRenderersFactory(activity)
+            .setEnableDecoderFallback(true)
+
+        val built = ExoPlayer.Builder(activity, renderers)
             .setLoadControl(load)
             .setTrackSelector(tracks)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(http))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(http, tsExtractors))
             .build()
 
         built.setVideoSurfaceView(surface)
@@ -320,10 +434,40 @@ class PlayerBridge(
             snapPlaying = isPlaying
         }
 
+        /* Read this before blaming the decoder. "No video track at all"
+           and "a video track nothing here can decode" look identical from
+           upstairs — silence and a black rectangle — and they have different
+           answers. */
+        override fun onTracksChanged(tracks: Tracks) {
+            val sb = StringBuilder()
+            for (g in tracks.groups) {
+                for (i in 0 until g.length) {
+                    val f = g.getTrackFormat(i)
+                    sb.append(if (sb.isEmpty()) "" else "; ")
+                        .append(f.sampleMimeType ?: "?")
+                        .append(' ').append(f.codecs ?: "-")
+                    if (f.width > 0) sb.append(' ').append(f.width).append('x').append(f.height)
+                    sb.append(if (g.isTrackSupported(i)) "" else " UNSUPPORTED")
+                    sb.append(if (g.isTrackSelected(i)) " [on]" else "")
+                }
+            }
+            if (sb.isEmpty()) sb.append("no tracks")
+            snapTracks = sb.toString()
+            Log.i(MainActivity.TAG, "tracks: $snapTracks")
+        }
+
         override fun onVideoSizeChanged(videoSize: VideoSize) {
             if (videoSize.width > 0 && videoSize.height > 0) {
                 snapVideoSize = "${videoSize.width}x${videoSize.height}"
             }
+        }
+
+        /* The picture is actually on the screen — which is a different claim
+           from "the player says it is ready", and the only one worth waiting
+           for. */
+        override fun onRenderedFirstFrame() {
+            sawFrame = true
+            main.removeCallbacks(noPicture)
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -339,12 +483,16 @@ class PlayerBridge(
     private fun fail(text: String, t: Throwable?) {
         snapPlaying = false
         val code = (t as? PlaybackException)?.errorCodeName
+        /* Two audiences. snapError carries the code for the diagnostics rows
+           and for logcat, where "format not supported" is a symptom and the
+           code is the thing worth reading. What goes up to the page is the
+           sentence alone, because that sentence is a key in ten dictionaries
+           and "Playback error (ERROR_CODE_IO_BAD_HTTP_STATUS)" is a key in
+           none of them. */
         snapError = if (code != null) "$text ($code)" else text
         setState("error")
-        /* The code by name, because "format not supported" is a symptom and
-           the code is the thing worth reading out of logcat. */
         Log.w(MainActivity.TAG, "player failed: $snapError", t)
-        emit("error", snapError)
+        emit("error", text)
     }
 
     /**
@@ -370,23 +518,31 @@ class PlayerBridge(
         PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
             "Format not supported by this device"
 
-        /* Broadcast IPTV is overwhelmingly 1080i, and a software decoder —
-           which is what an emulator has, and what a weak box falls back to —
-           frequently refuses field-coded H.264 outright. Naming it saves
-           somebody assuming the stream is broken. */
+        /* A decoder that actually failed, rather than one that was never
+           asked — those two are told apart by trackInfo(). Broadcast IPTV is
+           overwhelmingly 1080i and a software decoder can refuse field-coded
+           H.264 outright, but the parenthetical that used to name that as the
+           cause here was guessing, so it is gone. */
         PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
-            "This device cannot decode this video (interlaced streams need a hardware decoder)"
+            "This device cannot decode this channel's video"
 
         PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ->
             "Stream not found (channel may be offline)"
 
-        else -> "Playback error (${e.errorCodeName})"
+        /* The code is in snapError and in logcat; this is the half a
+           viewer reads, and it has to survive being looked up. */
+        else -> "Playback error"
     }
 
     companion object {
         /** Some providers refuse anything that looks like a browser. */
         const val USER_AGENT = "AquaPlay/1.0 (Android TV) ExoPlayer"
+
+        /** How long to wait for a first frame before calling it. Well past the
+         *  largest buffer the app ever asks for, so this only fires when the
+         *  picture genuinely is not coming. */
+        const val NO_PICTURE_MS = 20_000L
     }
 }
