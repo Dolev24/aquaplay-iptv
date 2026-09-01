@@ -283,6 +283,35 @@ Two browser-only playback limits, neither of which affects the TV:
 
 ## Put it on the TV
 
+Samsung will not install a package that is not signed for **your** television
+specifically, and there is no way around that from this end. What there is, is
+a choice about how much work the signing costs you.
+
+### The short way
+
+Two community tools do the whole job — find the TV, sign in to Samsung once,
+generate the certificate, sign the package, install it — without Tizen Studio
+existing on your machine:
+
+- **[Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung)** — Windows,
+  macOS, Linux, and an Android app, so the whole install can run from a phone.
+  Takes your own `.wgt`, not just its catalogue.
+- **[Tizen App Installer CLI](https://github.com/elfpie/tizen-app-installer-cli)**
+  — one binary, no configuration. Scans the network, lists the TVs it finds,
+  asks which `.wgt`, and does the rest.
+
+Both still need **Developer Mode** on the TV (below) and a Samsung account,
+because the certificate is Samsung's requirement rather than the tool's. What
+they save you is the IDE.
+
+Neither is written or maintained by this project — judge them as you would any
+third-party tool that wants your Samsung login.
+
+### The long way: Tizen Studio
+
+Worth it if you are going to change the code, since it also gives you the
+remote inspector and the emulator.
+
 ### One-time setup
 
 1. **Install Tizen Studio** with the *TV Extension* (Samsung Developer site).
@@ -330,6 +359,14 @@ Then launch **AquaPlay IPTV** from the TV's Apps row.
 
 Certificates from a personal Samsung account expire after two years, and the
 app stops launching when they do — rebuild and reinstall to renew.
+
+### Not from a USB stick
+
+A `.wgt` cannot be installed by putting it on a USB drive. Samsung blocks it
+deliberately, on consumer and hotel sets alike. The `.tmg` packages that *do*
+install from USB are made with the USB Demo Packaging Tool in Seller Office,
+are meant for shop-floor demo units, and do not launch on their own anyway.
+Developer Mode over the network is the route.
 
 ### Building the package without Tizen Studio
 
