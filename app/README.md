@@ -288,19 +288,36 @@ Two browser-only playback limits, neither of which affects the TV:
 1. **Install Tizen Studio** with the *TV Extension* (Samsung Developer site).
    Add `<tizen-studio>/tools/ide/bin` to your `PATH`.
 
-2. **Create a certificate.** In Tizen Studio: *Tools → Certificate Manager →
-   `+` → Samsung → TV*. Sign in with your Samsung account and add your TV's
-   **DUID** when asked. Name the profile `dev`.
+2. **Put the TV in Developer Mode first.** On the TV: *Apps* → press
+   `1 2 3 4 5` on the remote → set *Developer mode* **On** → enter your
+   computer's local IP → restart the TV. On 2024 and later sets there is a
+   second popup asking you to confirm; accept it.
 
-3. **Put the TV in Developer Mode.** On the TV: *Apps* → press `1 2 3 4 5` on
-   the remote → set *Developer mode* **On** → enter your computer's local IP →
-   restart the TV.
+   Do this *before* the certificate, because the certificate needs the DUID
+   and the easiest way to get the DUID is from a TV that is already talking
+   to your computer.
+
+3. **Create a certificate.** In Tizen Studio: *Tools → Certificate Manager →
+   `+` → Samsung → TV*. Sign in with your Samsung account.
+
+   When it asks for the **DUID**, connect the TV first —
+   `sdb connect <TV-IP>` — and Certificate Manager offers it in a list with a
+   `+` beside it, which is less error-prone than copying the 32 characters by
+   hand. `sdb devices` prints it too.
+
+   Name the profile `dev`, which is what `build.sh` looks for.
+
+   > **The DUID list is fixed once the certificate is made.** A certificate
+   > signs for the televisions named in it and no others, and that list
+   > cannot be edited afterwards — a second TV means a new certificate. This
+   > is also why nobody can hand you a signed `.wgt` that works on your set,
+   > and why the one attached to the release is unsigned.
 
 4. **Check the App ID.** `config.xml` ships `id="AquaPlay01.AquaPlay"
    package="AquaPlay01"`. A package id is any 10 alphanumeric characters, and
    that one qualifies; if Tizen Studio's wizard hands you a different prefix,
    put it in both attributes. What the TV really insists on is the signature
-   from step 2.
+   from step 3.
 
 ### Build and install
 
