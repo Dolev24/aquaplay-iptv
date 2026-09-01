@@ -1,0 +1,13 @@
+#EXTM3U url-tvg="https://dolev24.github.io/aquaplay-iptv/test/guide.xml"
+#EXTINF:-1 tvg-id="aqua.one" tvg-name="Aqua Demo One" tvg-chno="1" group-title="Demo News",Aqua Demo One
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
+#EXTINF:-1 tvg-id="aqua.two" tvg-name="Aqua Demo Two" tvg-chno="2" group-title="Demo News",Aqua Demo Two
+https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8
+#EXTINF:-1 tvg-id="aqua.three" tvg-name="Aqua Demo Three" tvg-chno="3" group-title="Demo News",Aqua Demo Three
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="aqua.four" tvg-name="Aqua Demo Four" tvg-chno="4" group-title="Demo Entertainment",Aqua Demo Four
+https://test-streams.mux.dev/pts_shift/master.m3u8
+#EXTINF:-1 tvg-id="aqua.five" tvg-name="Aqua Demo Five" tvg-chno="5" group-title="Demo Entertainment",Aqua Demo Five
+https://test-streams.mux.dev/tos_ismc/main.m3u8
+#EXTINF:-1 tvg-id="aqua.six" tvg-name="Aqua Demo Six" tvg-chno="6" group-title="Demo Entertainment",Aqua Demo Six
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
