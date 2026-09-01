@@ -166,7 +166,23 @@ const SPEC = [
      what the TV actually draws is icon.png above. */
   { file: path.join(BRAND, 'testing-icon-117x117.png'),
     what: 'testing icon (local install)', w: 117, h: 117, alpha: false, maxKB: 300 }
+]).concat([
+  /* Google Play's store listing. Three more shapes, none of them shared with
+     Samsung's, and the icon is the awkward one: Play asks for 32-bit WITH an
+     alpha channel where Tizen's guideline asks for 24-bit without. Nothing in
+     it is transparent — the channel is what is required, not the
+     transparency — so it is a separate file rather than icon.png reused. */
+  { file: path.join(BRAND, 'play-icon-512x512.png'),
+    what: 'Play listing icon', w: 512, h: 512, alpha: true, maxKB: 1024 },
+  { file: path.join(BRAND, 'play-feature-1024x500.png'),
+    what: 'Play feature graphic', w: 1024, h: 500, alpha: false, maxKB: 1024 },
+  { file: path.join(BRAND, 'play-tv-banner-1280x720.png'),
+    what: 'Play TV banner', w: 1280, h: 720, alpha: false, maxKB: 1024 }
 ]);
+
+/* Where Play's three start, so the writer finds them without counting the
+   mipmap and density blocks above. */
+const PLAY0 = SPEC.length - 3;
 
 /* ---------- the artwork's own background ----------
    Measured off icon-source.jpg on a five by five grid: 21 grey at the centre,
@@ -285,6 +301,17 @@ function flatten(rgba, bg, w, h) {
     for (let k = 0; k < 3; k++) {
       px[j + k] = Math.round(rgba[i + k] * a + bg[j + k] * (1 - a));
     }
+  }
+  return px;
+}
+
+/* The other direction, for Play's icon: three channels in, four out, opaque
+   throughout. flatten() hands back RGB and encodePNG's alpha path reads RGBA,
+   so without this the two do not meet and the picture comes out as noise. */
+function addAlpha(rgb, w, h) {
+  const px = Buffer.alloc(w * h * 4);
+  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+    px[j] = rgb[i]; px[j + 1] = rgb[i + 1]; px[j + 2] = rgb[i + 2]; px[j + 3] = 255;
   }
   return px;
 }
@@ -457,6 +484,9 @@ async function render(args) {
   const smallIcon = onBanner(args.smallTile);
   const tvBanners = (args.tvBanners || []).map(onBanner);
   const testIcon = onBanner(args.testIcon);
+  const playIcon = onBanner(args.playIcon);
+  const playFeature = onBanner(args.playFeature);
+  const playTvBanner = onBanner(args.playTvBanner);
   const foregrounds = args.foregrounds.map(function (n) {
     return onBanner({ w: n, h: n, share: args.foreground.share });
   });
@@ -487,7 +517,12 @@ async function render(args) {
     logo: b64(big.data),
     tvBanner: b64(tile.data),
     tvBanners: tvBanners.map(function (t) { return b64(t.data); }),
-    testIcon: b64(testIcon.data)
+    testIcon: b64(testIcon.data),
+    playIcon: b64(playIcon.data),
+    playFeature: b64(playFeature.data),
+    playFeatureBox: playFeature.box,
+    playTvBanner: b64(playTvBanner.data),
+    playTvBox: playTvBanner.box
   };
 }
 
@@ -585,6 +620,14 @@ function balanceLines(rgba, w, h) {
     tvBanner: { w: SPEC[4].w, h: SPEC[4].h, share: 0.78 },
     tvBanners: TV_DPI.map(function (t) { return { w: t[1], h: t[2], share: 0.78 }; }),
     testIcon: { w: 117, h: 117, share: 0.92 },
+    /* Play's three. The feature graphic is the widest box the mark has to sit
+       in and Play draws its own furniture over the edges of it, so that share
+       is the one that leaves the most room. The TV banner matches the launcher
+       banner's 0.78 on purpose: the same picture shows in the store and on the
+       home screen, and they should read as one asset rather than two. */
+    playIcon: { w: 512, h: 512, share: 0.92 },
+    playFeature: { w: 1024, h: 500, share: 0.62 },
+    playTvBanner: { w: 1280, h: 720, share: 0.78 },
     /* Edge to edge: this one is trimmed to the mark, so whatever draws it can
        size it by width and not have to know about a margin baked in. */
     inApp: { w: SPEC[5].w, h: SPEC[5].h, share: 0.98 },
@@ -633,6 +676,18 @@ function balanceLines(rgba, w, h) {
   const testSpec = SPEC[6 + MIPMAPS.length * 2 + TV_DPI.length];
   files.push([testSpec, encodePNG(flat(r.testIcon, testSpec.w, testSpec.h),
                                   testSpec.w, testSpec.h, false)]);
+  /* Play's three, on the same vignette as everything else. The icon goes
+     through addAlpha because the listing asks for the channel. */
+  const playIconSpec = SPEC[PLAY0];
+  files.push([playIconSpec,
+    encodePNG(addAlpha(flat(r.playIcon, playIconSpec.w, playIconSpec.h),
+                       playIconSpec.w, playIconSpec.h),
+              playIconSpec.w, playIconSpec.h, true)]);
+  ['playFeature', 'playTvBanner'].forEach(function (key, i) {
+    const spec = SPEC[PLAY0 + 1 + i];
+    files.push([spec, encodePNG(flat(r[key], spec.w, spec.h),
+                                spec.w, spec.h, false)]);
+  });
   files.forEach(function (f) {
     fs.mkdirSync(path.dirname(f[0].file), { recursive: true });
     fs.writeFileSync(f[0].file, f[1]);
@@ -644,7 +699,11 @@ function balanceLines(rgba, w, h) {
               '   (a crop would have been ' + r.crop + ')');
   console.log('  banner   wordmark at ' + r.logoBox + ' on ' + SPEC[3].w + 'x' + SPEC[3].h);
   console.log('  tv tile  wordmark at ' + r.tvBox + ' on ' + SPEC[4].w + 'x' + SPEC[4].h);
-  console.log('  in-app   wordmark at ' + r.inAppBox + ' on ' + SPEC[5].w + 'x' + SPEC[5].h + '\n');
+  console.log('  in-app   wordmark at ' + r.inAppBox + ' on ' + SPEC[5].w + 'x' + SPEC[5].h);
+  console.log('  play     ' + r.playFeatureBox + ' on ' +
+              SPEC[PLAY0 + 1].w + 'x' + SPEC[PLAY0 + 1].h + ' (feature)   ' +
+              r.playTvBox + ' on ' +
+              SPEC[PLAY0 + 2].w + 'x' + SPEC[PLAY0 + 2].h + ' (tv banner)' + '\n');
   const bad = check();
   console.log('');
   process.exit(bad ? 1 : 0);

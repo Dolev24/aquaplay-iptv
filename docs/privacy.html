@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AquaPlay IPTV — Privacy Policy</title>
+<style>
+  :root{
+    --bg:#0a0c10; --raised:#101319; --line:#232833;
+    --text:#e8ecf3; --dim:#a2aab8; --accent:#6ea2ff;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f4f6fa; --raised:#ffffff; --line:#d3dae6;
+      --text:#0d1017; --dim:#4b5464; --accent:#1f57bb;
+    }
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  main{ max-width:720px; margin:0 auto; padding:56px 24px 96px; }
+  h1{ font-size:34px; line-height:1.15; margin:0 0 6px; letter-spacing:-.02em; }
+  .sub{ color:var(--dim); margin:0 0 40px; font-size:15px; }
+  h2{ font-size:19px; margin:38px 0 10px; letter-spacing:-.01em; }
+  p, li{ color:var(--text); }
+  p{ margin:0 0 14px; }
+  ul{ margin:0 0 14px; padding-left:22px; }
+  li{ margin-bottom:8px; }
+  .lead{
+    background:var(--raised); border:1px solid var(--line);
+    border-radius:10px; padding:20px 22px; margin:0 0 34px;
+  }
+  .lead p:last-child{ margin-bottom:0; }
+  strong{ font-weight:600; }
+  code{
+    font-family:ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size:.9em; background:var(--raised);
+    border:1px solid var(--line); border-radius:4px; padding:1px 5px;
+  }
+  a{ color:var(--accent); }
+  footer{
+    margin-top:52px; padding-top:20px; border-top:1px solid var(--line);
+    color:var(--dim); font-size:14px;
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Privacy Policy</h1>
+  <p class="sub">AquaPlay IPTV · last updated 1 September 2026</p>
+
+  <div class="lead">
+    <p><strong>AquaPlay does not collect, transmit or store any personal information about you.</strong> There are no accounts, no sign-up, no analytics, no advertising, no tracking and no third-party SDKs of any kind.</p>
+    <p>Everything you put into the app stays on your television.</p>
+  </div>
+
+  <h2>What the app stores, and where</h2>
+  <p>AquaPlay keeps your settings on the device itself, in the app's own private storage. That includes:</p>
+  <ul>
+    <li>the playlist details you enter — server address, username and password for an Xtream Codes account, or an M3U URL</li>
+    <li>your favourites, recently watched channels, and any channel numbers you have reassigned</li>
+    <li>your preferences: language, theme, picture size, buffer settings, reminders, and any per-channel PIN locks</li>
+  </ul>
+  <p>None of this is sent to us. There is no AquaPlay server, no account system, and no remote backup — we have no way to see any of it, and no way to recover it for you if it is lost.</p>
+
+  <h2>Who your details are sent to</h2>
+  <p>Your playlist credentials are sent to <strong>one place only: the IPTV provider whose address you entered</strong>. That is what makes the app work — it asks your provider for your channel list, guide and streams, exactly as you asked it to.</p>
+  <p>AquaPlay ships with no channels and no playlists, and is not affiliated with any provider. Your relationship with your provider, and their handling of your data, is between you and them — their own privacy policy applies to it, not this one.</p>
+  <p>If your playlist supplies channel logos or a programme guide hosted elsewhere, your device fetches those directly from whichever servers your provider points at. Those servers will see your IP address, as with any request your device makes.</p>
+
+  <h2>The one other connection the app makes</h2>
+  <p>Once a day at most, AquaPlay asks <code>api.github.com</code> whether a newer version has been released, so it can tell you one exists. This request sends no information about you, your playlist or your viewing — only the ordinary details any web request carries, such as your IP address, which GitHub receives as the operator of that service. Nothing is sent if the check fails, and the app never updates itself.</p>
+
+  <h2>Permissions</h2>
+  <p>The Android app requests three permissions, all of them required to play video from a network:</p>
+  <ul>
+    <li><strong>Internet</strong> — to reach your provider</li>
+    <li><strong>Network state</strong> — to notice when the connection drops, so a stream can be reconnected</li>
+    <li><strong>Keep screen on</strong> — so the television does not blank while you are watching</li>
+  </ul>
+  <p>AquaPlay does not request access to your location, contacts, camera, microphone, files or accounts, and does not use the advertising identifier.</p>
+
+  <h2>Children</h2>
+  <p>AquaPlay is a general-purpose media player and is not directed at children. It does not knowingly collect information from anyone, of any age. The channels available in it are determined entirely by the playlist you supply; the app includes a PIN lock you can apply to individual channels.</p>
+
+  <h2>Removing your data</h2>
+  <p>Because everything is stored on the device, you remove all of it by clearing the app's data or uninstalling the app. On Android TV that is <strong>Settings → Apps → AquaPlay → Clear data</strong>. Within the app, removing a playlist deletes its stored credentials immediately.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the updated version will appear at this address with a new date at the top. AquaPlay is open source, so the full history of this document is public alongside the code.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy, or about the app: <a href="mailto:YOUR-EMAIL@example.com">YOUR-EMAIL@example.com</a></p>
+  <p>Source code and issue tracker: <a href="https://github.com/Dolev24/aquaplay-iptv">github.com/Dolev24/aquaplay-iptv</a></p>
+
+  <footer>
+    AquaPlay IPTV is free software released under the MIT licence.
+    It is not affiliated with, endorsed by, or connected to Samsung, Google, or any IPTV provider.
+  </footer>
+
+</main>
+</body>
+</html>
